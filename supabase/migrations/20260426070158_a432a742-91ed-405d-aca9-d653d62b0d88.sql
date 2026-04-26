@@ -1,0 +1,1 @@
+DELETE FROM public.api_cache WHERE function_name = 'perplexity-osint';

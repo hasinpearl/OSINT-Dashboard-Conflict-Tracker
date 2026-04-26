@@ -1,0 +1,1 @@
+DELETE FROM public.api_cache WHERE function_name IN ('firecrawl-news','perplexity-analyst','perplexity-osint','telegram-feed','ai-summarize');
