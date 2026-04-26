@@ -7,6 +7,7 @@ import { useLanguage } from "@/i18n/LanguageContext";
 import { useTranslatedData } from "@/hooks/useTranslatedData";
 import { ExpandablePanel } from "./ExpandablePanel";
 import { formatLocalDateTime } from "@/utils/formatTime";
+import { useConflictFilter } from "@/contexts/ConflictFilterContext";
 
 interface NewsItem {
   headline: string;
@@ -19,11 +20,12 @@ interface NewsItem {
 
 export const NewsFeed = () => {
   const { t } = useLanguage();
+  const { conflict } = useConflictFilter();
 
   const { data, isLoading, error } = useQuery({
-    queryKey: ["news-feed"],
+    queryKey: ["news-feed", conflict],
     queryFn: async () => {
-      const { data, error } = await supabase.functions.invoke("firecrawl-news");
+      const { data, error } = await supabase.functions.invoke("firecrawl-news", { body: { conflict } });
       if (error) throw error;
       return data as { stories: NewsItem[] };
     },

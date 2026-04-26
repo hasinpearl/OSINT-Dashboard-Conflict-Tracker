@@ -1,8 +1,9 @@
 import { getCached, setCache } from "../_shared/cache.ts";
 import { logCost, logCacheHit, PRICES } from "../_shared/costs.ts";
 import { corsHeadersFor, errorResponse } from "../_shared/cors.ts";
+import { getConflictConfig, readConflictFromRequest } from "../_shared/conflicts.ts";
 
-const CACHE_KEY = "perplexity-osint";
+const CACHE_KEY_BASE = "perplexity-osint";
 const PANEL = "osint";
 
 Deno.serve(async (req) => {
@@ -12,6 +13,10 @@ Deno.serve(async (req) => {
   }
 
   try {
+    const conflict = await readConflictFromRequest(req);
+    const config = getConflictConfig(conflict);
+    const CACHE_KEY = `${CACHE_KEY_BASE}:${config.key}`;
+
     const cached = await getCached(CACHE_KEY);
     if (cached) {
       logCacheHit(PANEL, "perplexity");
@@ -37,11 +42,11 @@ Deno.serve(async (req) => {
         messages: [
           {
             role: "system",
-            content: "You are an OSINT analyst. Return ONLY valid JSON with no markdown.",
+            content: `You are an OSINT analyst covering the ${config.label} conflict in ${config.region}. Return ONLY valid JSON with no markdown.`,
           },
           {
             role: "user",
-            content: `Search for the latest OSINT intelligence on Iran and Middle East military activities from sources like Bellingcat, OSINT Defender, Janes Defence. Return JSON: {"items":[{"title":"...","summary":"2 sentences","source":"source name","confidence":"verified|unverified|developing","timestamp":"ISO 8601 UTC timestamp e.g. 2026-04-28T14:30:00Z","url":"https://..."}]}. The timestamp MUST be a valid ISO 8601 UTC timestamp e.g. 2026-04-28T14:30:00Z. Do not use relative timestamps. Return the top 6 most significant items from the last 48 hours. Every item MUST include a valid, clickable source URL from the original report. If you cannot provide a verified source URL for an item, do not include that item.`,
+            content: `Search for the latest OSINT intelligence on military and security activities in ${config.region} relevant to the ${config.label} conflict (key topics: ${config.searchTerms}) from sources like Bellingcat, OSINT Defender, Janes Defence, and reputable verified analysts on X/Twitter. Return JSON: {"items":[{"title":"...","summary":"2 sentences","source":"source name","confidence":"verified|unverified|developing","timestamp":"ISO 8601 UTC timestamp e.g. 2026-04-28T14:30:00Z","url":"https://..."}]}. The timestamp MUST be a valid ISO 8601 UTC timestamp e.g. 2026-04-28T14:30:00Z. Do not use relative timestamps. Return the top 6 most significant items from the last 48 hours. Every item MUST include a valid, clickable source URL from the original report. If you cannot provide a verified source URL for an item, do not include that item.`,
           },
         ],
         search_domain_filter: ["bellingcat.com", "janes.com", "twitter.com"],

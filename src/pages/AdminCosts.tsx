@@ -28,6 +28,22 @@ const AdminCosts = () => {
   const [summary, setSummary] = useState<SummaryRow[]>([]);
   const [recent, setRecent] = useState<RecentRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [auditing, setAuditing] = useState(false);
+  const [auditResult, setAuditResult] = useState<any>(null);
+
+  const runAudit = async () => {
+    setAuditing(true);
+    setAuditResult(null);
+    try {
+      const { data, error } = await supabase.functions.invoke("audit-refresh");
+      if (error) setAuditResult({ error: error.message });
+      else setAuditResult(data);
+    } catch (e: any) {
+      setAuditResult({ error: e?.message ?? String(e) });
+    } finally {
+      setAuditing(false);
+    }
+  };
 
   useEffect(() => {
     if (!session || !isAdmin) return;
@@ -87,8 +103,22 @@ const AdminCosts = () => {
             Per-panel API spend tracking. Auto-refreshes every 30s.
           </p>
         </div>
-        <Button variant="outline" size="sm" onClick={signOut}>Sign out</Button>
+        <div className="flex items-center gap-2">
+          <Button variant="default" size="sm" onClick={runAudit} disabled={auditing}>
+            {auditing ? "Auditing…" : "Run audit now"}
+          </Button>
+          <Button variant="outline" size="sm" onClick={signOut}>Sign out</Button>
+        </div>
       </div>
+
+      {auditResult && (
+        <Card className="p-4 mb-6">
+          <div className="text-xs text-muted-foreground uppercase tracking-wide mb-2">Last audit result</div>
+          <pre className="text-xs font-mono whitespace-pre-wrap break-all">
+            {JSON.stringify(auditResult, null, 2)}
+          </pre>
+        </Card>
+      )}
 
       {loading && <p className="text-muted-foreground">Loading…</p>}
 

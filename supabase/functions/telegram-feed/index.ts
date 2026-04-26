@@ -1,8 +1,9 @@
 import { getCached, setCache } from "../_shared/cache.ts";
 import { logCost, logCacheHit, PRICES } from "../_shared/costs.ts";
 import { corsHeadersFor, errorResponse } from "../_shared/cors.ts";
+import { getConflictConfig, readConflictFromRequest } from "../_shared/conflicts.ts";
 
-const CACHE_KEY = "telegram-feed";
+const CACHE_KEY_BASE = "telegram-feed";
 const PANEL = "telegram";
 
 const CHANNELS = [
@@ -14,6 +15,9 @@ const CHANNELS = [
   "DDGeopolitics",
   "thecradlemedia",
   "warmonitors",
+  "CIG_telegram",
+  "monitor_the_situation",
+  "ukr_leaks_eng",
 ];
 
 async function scrapeChannel(firecrawlKey: string, channel: string): Promise<string | null> {
@@ -45,7 +49,11 @@ async function scrapeChannel(firecrawlKey: string, channel: string): Promise<str
   return null;
 }
 
-async function parseWithPerplexity(perplexityKey: string, content: string) {
+async function parseWithPerplexity(
+  perplexityKey: string,
+  content: string,
+  conflictFilter: string,
+) {
   logCost({ panel: PANEL, provider: "perplexity", model: "sonar", costUsd: PRICES.perplexity_sonar });
   const res = await fetch("https://api.perplexity.ai/chat/completions", {
     method: "POST",
@@ -62,7 +70,7 @@ async function parseWithPerplexity(perplexityKey: string, content: string) {
         },
         {
           role: "user",
-          content: `Extract individual posts from these Telegram channels. Return JSON: {"messages":[{"channel":"username","text":"post text, 1-2 sentences","timestamp":"ISO 8601 UTC timestamp in full ISO 8601 format YYYY-MM-DDTHH:mm:ssZ, e.g. 2026-04-28T14:30:00Z","message_id":number}]}. The timestamp MUST be a valid ISO 8601 UTC timestamp in full ISO 8601 format YYYY-MM-DDTHH:mm:ssZ. Do not use relative timestamps or space-separated date/time formats. Most recent first, up to 15 messages.\n\n${content}`,
+          content: `Extract individual posts from these Telegram channels.${conflictFilter} Return JSON: {"messages":[{"channel":"username","text":"post text, 1-2 sentences","timestamp":"ISO 8601 UTC timestamp in full ISO 8601 format YYYY-MM-DDTHH:mm:ssZ, e.g. 2026-04-28T14:30:00Z","message_id":number}]}. The timestamp MUST be a valid ISO 8601 UTC timestamp in full ISO 8601 format YYYY-MM-DDTHH:mm:ssZ. Do not use relative timestamps or space-separated date/time formats. Most recent first, up to 15 messages.\n\n${content}`,
         },
       ],
     }),
@@ -102,6 +110,16 @@ Deno.serve(async (req) => {
     const url = new URL(req.url);
     const forceRefresh = url.searchParams.get("force_refresh") === "true";
 
+    const conflict = await readConflictFromRequest(req);
+    const config = getConflictConfig(conflict);
+    const CACHE_KEY = `${CACHE_KEY_BASE}:${config.key}`;
+
+    // Per-conflict prompt filter — keep all channels but instruct the LLM to filter by topic
+    const conflictFilter =
+      config.key === "all"
+        ? ""
+        : ` Only include posts relevant to the ${config.label} conflict (key topics: ${config.searchTerms}). Exclude posts about other conflicts or unrelated topics.`;
+
     // Check cache first (unless force_refresh)
     if (!forceRefresh) {
       const cached = await getCached(CACHE_KEY);
@@ -124,10 +142,12 @@ Deno.serve(async (req) => {
       });
     }
 
+    // Scrape in batches of 4 to avoid overwhelming Firecrawl (11 channels → 4-4-3)
     const batch1 = await Promise.all(CHANNELS.slice(0, 4).map(c => scrapeChannel(firecrawlKey, c)));
-    const batch2 = await Promise.all(CHANNELS.slice(4).map(c => scrapeChannel(firecrawlKey, c)));
+    const batch2 = await Promise.all(CHANNELS.slice(4, 8).map(c => scrapeChannel(firecrawlKey, c)));
+    const batch3 = await Promise.all(CHANNELS.slice(8).map(c => scrapeChannel(firecrawlKey, c)));
 
-    const allContent = [...batch1, ...batch2].filter(Boolean) as string[];
+    const allContent = [...batch1, ...batch2, ...batch3].filter(Boolean) as string[];
 
     if (allContent.length === 0) {
       return new Response(JSON.stringify({ messages: [] }), {
@@ -137,9 +157,9 @@ Deno.serve(async (req) => {
 
     const mid = Math.ceil(allContent.length / 2);
     const [msgs1, msgs2] = await Promise.all([
-      parseWithPerplexity(perplexityKey, allContent.slice(0, mid).join("\n---\n")),
+      parseWithPerplexity(perplexityKey, allContent.slice(0, mid).join("\n---\n"), conflictFilter),
       allContent.length > mid
-        ? parseWithPerplexity(perplexityKey, allContent.slice(mid).join("\n---\n"))
+        ? parseWithPerplexity(perplexityKey, allContent.slice(mid).join("\n---\n"), conflictFilter)
         : Promise.resolve([]),
     ]);
 

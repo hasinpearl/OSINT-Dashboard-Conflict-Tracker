@@ -1,19 +1,10 @@
 import { getCached, setCache } from "../_shared/cache.ts";
 import { logCost, logCacheHit, PRICES } from "../_shared/costs.ts";
 import { corsHeadersFor, errorResponse } from "../_shared/cors.ts";
+import { getConflictConfig, readConflictFromRequest } from "../_shared/conflicts.ts";
 
-const CACHE_KEY = "ai-summarize";
+const CACHE_KEY_BASE = "ai-summarize";
 const PANEL = "hot-topics";
-
-// War start date: February 28, 2026
-const WAR_START_DATE = "2026-02-28";
-
-const SCRAPE_SOURCES = [
-  { url: "https://www.reuters.com/world/middle-east/", name: "Reuters" },
-  { url: "https://www.bbc.com/news/world/middle_east", name: "BBC" },
-  { url: "https://www.aljazeera.com/middle-east/", name: "Al Jazeera" },
-  { url: "https://apnews.com/hub/middle-east", name: "AP News" },
-];
 
 async function firecrawlScrape(url: string, apiKey: string): Promise<string> {
   try {
@@ -72,14 +63,20 @@ Deno.serve(async (req) => {
   try {
     const url = new URL(req.url);
     let forceRefresh = url.searchParams.get("force_refresh") === "true";
-    if (!forceRefresh && (req.method === "POST" || req.method === "PUT")) {
+    let bodyConflict: string | undefined;
+    if (req.method === "POST" || req.method === "PUT") {
       try {
         const body = await req.clone().json();
         if (body && body.force_refresh === true) forceRefresh = true;
+        if (body && typeof body.conflict === "string") bodyConflict = body.conflict;
       } catch {
         // ignore non-JSON bodies
       }
     }
+
+    const config = getConflictConfig(bodyConflict);
+    const CACHE_KEY = `${CACHE_KEY_BASE}:${config.key}`;
+    const WAR_START_DATE = config.timelineStartDate;
 
     if (!forceRefresh) {
       const cached = await getCached(CACHE_KEY);
@@ -101,23 +98,24 @@ Deno.serve(async (req) => {
 
     const today = new Date().toISOString().split("T")[0];
 
-    // STEP 1: Scrape real timeline pages from journalist-maintained sources.
+    // STEP 1: Scrape real timeline pages from journalist-maintained sources for this conflict.
+    const sourcesToScrape = config.newsSources.slice(0, 4);
     const scrapeResults = await Promise.all(
-      SCRAPE_SOURCES.map(async (s) => {
+      sourcesToScrape.map(async (sourceUrl) => {
         logCost({
           panel: PANEL,
           provider: "firecrawl",
           model: "scrape",
           costUsd: PRICES.firecrawl_scrape,
         });
-        const md = await firecrawlScrape(s.url, firecrawlKey);
-        return { ...s, markdown: md };
+        const md = await firecrawlScrape(sourceUrl, firecrawlKey);
+        return { url: sourceUrl, markdown: md };
       })
     );
 
     const scrapedContent = scrapeResults
       .filter((r) => r.markdown)
-      .map((r) => `=== ${r.name} (${r.url}) ===\n${r.markdown}`)
+      .map((r) => `=== ${r.url} ===\n${r.markdown}`)
       .join("\n\n");
 
     if (!scrapedContent) {
@@ -135,11 +133,12 @@ Deno.serve(async (req) => {
       costUsd: PRICES.perplexity_sonar_pro,
     });
 
-    const userPrompt = `You are a timeline editor. From the following scraped news content, extract ONLY major developments in the Iran-Israel/US conflict that occurred between ${WAR_START_DATE} and today (${today}).
+    const userPrompt = `You are a timeline editor. From the following scraped news content, extract ONLY major developments in the ${config.label} conflict (key topics: ${config.searchTerms}) that occurred between ${WAR_START_DATE} and today (${today}).
 
 STRICT RULES:
 - ONLY use events explicitly mentioned in the scraped content below. Do NOT add events from your own knowledge.
 - Each event MUST have a date that appears in the scraped text. If no date is visible, skip it.
+- Each event MUST be relevant to the ${config.label} conflict. Skip unrelated stories.
 - NO duplicates — if two sources mention the same event, merge them into one entry.
 - Order from OLDEST to NEWEST.
 - Maximum 15 entries.
@@ -162,7 +161,7 @@ ${scrapedContent}`;
         messages: [
           {
             role: "system",
-            content: `You are a strict timeline editor. You ONLY use facts from the provided scraped text. You NEVER add events from memory. Today is ${today}. Return ONLY valid JSON, no markdown.`,
+            content: `You are a strict timeline editor for the ${config.label} conflict. You ONLY use facts from the provided scraped text. You NEVER add events from memory. Today is ${today}. Return ONLY valid JSON, no markdown.`,
           },
           { role: "user", content: userPrompt },
         ],

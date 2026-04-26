@@ -87,6 +87,13 @@ const translations: Record<string, Record<Language, string>> = {
 
   // Loading
   "loading.translating": { en: "Translating...", ar: "جاري الترجمة..." },
+
+  // Conflict filter
+  "conflict.label": { en: "CONFLICT", ar: "الصراع" },
+  "conflict.all": { en: "All", ar: "الكل" },
+  "conflict.iran-us": { en: "Iran / U.S.", ar: "إيران / الولايات المتحدة" },
+  "conflict.ukraine-russia": { en: "Ukraine / Russia", ar: "أوكرانيا / روسيا" },
+  "conflict.china-taiwan": { en: "China / Taiwan", ar: "الصين / تايوان" },
 };
 
 export const LanguageProvider = ({ children }: { children: ReactNode }) => {

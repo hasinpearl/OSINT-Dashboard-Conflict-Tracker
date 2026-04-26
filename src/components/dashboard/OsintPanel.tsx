@@ -7,6 +7,7 @@ import { useLanguage } from "@/i18n/LanguageContext";
 import { useTranslatedData } from "@/hooks/useTranslatedData";
 import { ExpandablePanel } from "./ExpandablePanel";
 import { formatLocalDateTime } from "@/utils/formatTime";
+import { useConflictFilter } from "@/contexts/ConflictFilterContext";
 
 interface OsintItem {
   title: string;
@@ -25,11 +26,12 @@ const CONFIDENCE_STYLES: Record<string, string> = {
 
 export const OsintPanel = () => {
   const { t } = useLanguage();
+  const { conflict } = useConflictFilter();
 
   const { data, isLoading, error } = useQuery({
-    queryKey: ["osint"],
+    queryKey: ["osint", conflict],
     queryFn: async () => {
-      const { data, error } = await supabase.functions.invoke("perplexity-osint");
+      const { data, error } = await supabase.functions.invoke("perplexity-osint", { body: { conflict } });
       if (error) throw error;
       return data as { items: OsintItem[] };
     },

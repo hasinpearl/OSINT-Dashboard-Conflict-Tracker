@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useLanguage, Language } from "@/i18n/LanguageContext";
+import { useConflictFilter } from "@/contexts/ConflictFilterContext";
 
 /**
  * Returns true if `translated` looks usable compared to `original`.
@@ -53,9 +54,11 @@ export function useTranslatedData<T>(
   queryKey: string
 ) {
   const { language } = useLanguage();
+  const { conflict } = useConflictFilter();
+  const scopedKey = `${queryKey}:${conflict}`;
 
   const { data: translatedData, isLoading: isTranslating } = useQuery({
-    queryKey: [queryKey, "translate", language],
+    queryKey: [scopedKey, "translate", language],
     queryFn: async () => {
       if (language === "en" || !originalData) return originalData;
       try {

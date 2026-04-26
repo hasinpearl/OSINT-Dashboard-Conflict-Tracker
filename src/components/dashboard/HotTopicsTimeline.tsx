@@ -8,6 +8,7 @@ import { useLanguage } from "@/i18n/LanguageContext";
 import { useTranslatedData } from "@/hooks/useTranslatedData";
 import { ExpandablePanel } from "./ExpandablePanel";
 import { formatLocalDate } from "@/utils/formatTime";
+import { useConflictFilter } from "@/contexts/ConflictFilterContext";
 
 interface HotTopic {
   title: string;
@@ -21,13 +22,14 @@ interface HotTopic {
 export const HotTopicsTimeline = () => {
   const { t } = useLanguage();
   const queryClient = useQueryClient();
+  const { conflict } = useConflictFilter();
   // Force a fresh fetch on the first request after page load.
   const initialLoadRef = useRef(true);
   const forceNextRef = useRef(false);
   const [isManualRefreshing, setIsManualRefreshing] = useState(false);
 
   const { data, isLoading, error, refetch, isFetching } = useQuery({
-    queryKey: ["hot-topics"],
+    queryKey: ["hot-topics", conflict],
     queryFn: async () => {
       const shouldForce = initialLoadRef.current || forceNextRef.current;
       initialLoadRef.current = false;
@@ -35,10 +37,7 @@ export const HotTopicsTimeline = () => {
 
       const { data, error } = await supabase.functions.invoke("ai-summarize", {
         method: "POST",
-        ...(shouldForce ? { body: { force_refresh: true } } : {}),
-        ...(shouldForce
-          ? { headers: {} } // ensure POST path
-          : {}),
+        body: { conflict, ...(shouldForce ? { force_refresh: true } : {}) },
       } as any);
 
       if (error) throw error;

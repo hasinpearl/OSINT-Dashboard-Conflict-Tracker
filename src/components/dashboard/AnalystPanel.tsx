@@ -7,6 +7,7 @@ import { useLanguage } from "@/i18n/LanguageContext";
 import { useTranslatedData } from "@/hooks/useTranslatedData";
 import { ExpandablePanel } from "./ExpandablePanel";
 import { formatLocalDateTime } from "@/utils/formatTime";
+import { useConflictFilter } from "@/contexts/ConflictFilterContext";
 
 interface AnalystComment {
   analyst: string;
@@ -19,11 +20,12 @@ interface AnalystComment {
 
 export const AnalystPanel = () => {
   const { t } = useLanguage();
+  const { conflict } = useConflictFilter();
 
   const { data, isLoading, error } = useQuery({
-    queryKey: ["analyst"],
+    queryKey: ["analyst", conflict],
     queryFn: async () => {
-      const { data, error } = await supabase.functions.invoke("perplexity-analyst");
+      const { data, error } = await supabase.functions.invoke("perplexity-analyst", { body: { conflict } });
       if (error) throw error;
       return data as { comments: AnalystComment[] };
     },

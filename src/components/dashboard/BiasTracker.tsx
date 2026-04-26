@@ -6,6 +6,7 @@ import { BarChart3 } from "lucide-react";
 import { useLanguage } from "@/i18n/LanguageContext";
 import { useTranslatedData } from "@/hooks/useTranslatedData";
 import { ExpandablePanel } from "./ExpandablePanel";
+import { useConflictFilter } from "@/contexts/ConflictFilterContext";
 
 interface BiasData {
   total_stories: number;
@@ -20,38 +21,121 @@ interface BiasData {
   top_center_story: string;
   top_right_story: string;
   last_updated: string;
+  left_label: string;
+  center_label: string;
+  right_label: string;
 }
 
-const SpectrumBar = ({ left, center, right }: { left: number; center: number; right: number }) => {
+interface SingleResponse extends BiasData {
+  mode: "single";
+  conflict: string;
+  label: string;
+}
+
+interface AllResponse {
+  mode: "all";
+  conflicts: Array<BiasData & { conflict: string; label: string }>;
+  last_updated: string;
+}
+
+type BiasResponse = SingleResponse | AllResponse;
+
+const SpectrumBar = ({
+  left,
+  center,
+  right,
+  leftLabel,
+  centerLabel,
+  rightLabel,
+}: {
+  left: number;
+  center: number;
+  right: number;
+  leftLabel: string;
+  centerLabel: string;
+  rightLabel: string;
+}) => {
   const total = Math.max(left + center + right, 0.0001);
   const l = (left / total) * 100;
   const c = (center / total) * 100;
   const r = (right / total) * 100;
   return (
     <div className="flex h-3 w-full rounded-sm overflow-hidden bg-muted border border-border">
-      {l > 0 && <div className="bg-blue-600" style={{ width: `${l}%` }} title={`U.S./Israel ${l.toFixed(0)}%`} />}
-      {c > 0 && <div className="bg-gray-400" style={{ width: `${c}%` }} title={`Neutral ${c.toFixed(0)}%`} />}
-      {r > 0 && <div className="bg-red-600" style={{ width: `${r}%` }} title={`Iran ${r.toFixed(0)}%`} />}
+      {l > 0 && (
+        <div className="bg-blue-600" style={{ width: `${l}%` }} title={`${leftLabel} ${l.toFixed(0)}%`} />
+      )}
+      {c > 0 && (
+        <div className="bg-gray-400" style={{ width: `${c}%` }} title={`${centerLabel} ${c.toFixed(0)}%`} />
+      )}
+      {r > 0 && (
+        <div className="bg-red-600" style={{ width: `${r}%` }} title={`${rightLabel} ${r.toFixed(0)}%`} />
+      )}
     </div>
   );
 };
 
+const ConflictBar = ({
+  data,
+  showTitle,
+  title,
+}: {
+  data: BiasData;
+  showTitle?: boolean;
+  title?: string;
+}) => (
+  <div className="space-y-1.5">
+    {showTitle && title && (
+      <div className="text-[11px] font-mono uppercase tracking-wide text-foreground/80">
+        {title}
+      </div>
+    )}
+    <div className="flex justify-between text-[10px] font-mono text-muted-foreground uppercase">
+      <span>{data.left_label}</span>
+      <span>{data.center_label}</span>
+      <span>{data.right_label}</span>
+    </div>
+    <SpectrumBar
+      left={data.left_pct}
+      center={data.center_pct}
+      right={data.right_pct}
+      leftLabel={data.left_label}
+      centerLabel={data.center_label}
+      rightLabel={data.right_label}
+    />
+    <div className="flex justify-between text-[11px] font-mono">
+      <span className="text-blue-500">{Math.round(data.left_pct)}%</span>
+      <span className="text-muted-foreground">{Math.round(data.center_pct)}%</span>
+      <span className="text-red-500">{Math.round(data.right_pct)}%</span>
+    </div>
+  </div>
+);
+
+// Track which conflicts have already been force-refreshed this session,
+// so we bypass any stale cache from the old (un-suffixed) bias-tracker key
+// exactly once per conflict.
+const refreshedConflicts = new Set<string>();
+
 export const BiasTracker = () => {
   const { t } = useLanguage();
+  const { conflict } = useConflictFilter();
 
   const { data, isLoading, error } = useQuery({
-    queryKey: ["bias-tracker"],
+    queryKey: ["bias-tracker", conflict],
     queryFn: async () => {
-      const { data, error } = await supabase.functions.invoke("bias-tracker");
+      const force_refresh = !refreshedConflicts.has(conflict);
+      const { data, error } = await supabase.functions.invoke("bias-tracker", {
+        body: { conflict, force_refresh },
+      });
       if (error) throw error;
-      return data as BiasData;
+      refreshedConflicts.add(conflict);
+      return data as BiasResponse;
     },
     staleTime: 12 * 60 * 60 * 1000,
     refetchInterval: 12 * 60 * 60 * 1000,
   });
 
   const { data: translated, isTranslating } = useTranslatedData(data, "bias-tracker");
-  const view = (translated ?? data) as BiasData | undefined;
+  const view = (translated ?? data) as BiasResponse | undefined;
 
   const lastAnalyzed = view?.last_updated
     ? new Date(view.last_updated).toLocaleString()
@@ -81,28 +165,42 @@ export const BiasTracker = () => {
               <p className="text-severity-critical font-mono text-xs">{t("bias.offline")}</p>
             </div>
           )}
-          {view && !isLoading && !isTranslating && (
+
+          {view && view.mode === "all" && !isLoading && !isTranslating && (
             <div className="space-y-4">
-              {/* Spectrum bar with side labels */}
-              <div className="space-y-1.5">
-                <div className="flex justify-between text-[10px] font-mono text-muted-foreground uppercase">
-                  <span>U.S. / Israel</span>
-                  <span>Neutral / Intl</span>
-                  <span>Iran</span>
-                </div>
-                <SpectrumBar
-                  left={view.left_pct}
-                  center={view.center_pct}
-                  right={view.right_pct}
-                />
-                <div className="flex justify-between text-[11px] font-mono">
-                  <span className="text-blue-500">U.S./Israel: {Math.round(view.left_pct)}%</span>
-                  <span className="text-muted-foreground">Neutral: {Math.round(view.center_pct)}%</span>
-                  <span className="text-red-500">Iran: {Math.round(view.right_pct)}%</span>
-                </div>
+              <div className="space-y-4">
+                {view.conflicts.map((c) => (
+                  <ConflictBar key={c.conflict} data={c} showTitle title={c.label} />
+                ))}
               </div>
 
-              {/* Summary */}
+              {/* Combined summary across all conflicts */}
+              <div className="pt-2 border-t border-border space-y-2">
+                {view.conflicts.map(
+                  (c) =>
+                    c.summary && (
+                      <div key={`sum-${c.conflict}`}>
+                        <div className="text-[10px] font-mono uppercase text-muted-foreground mb-0.5">
+                          {c.label}
+                        </div>
+                        <p className="text-xs text-foreground/90 leading-relaxed">{c.summary}</p>
+                      </div>
+                    ),
+                )}
+              </div>
+
+              {lastAnalyzed && (
+                <div className="text-[10px] font-mono text-muted-foreground pt-2 border-t border-border">
+                  Last analyzed: {lastAnalyzed}
+                </div>
+              )}
+            </div>
+          )}
+
+          {view && view.mode === "single" && !isLoading && !isTranslating && (
+            <div className="space-y-4">
+              <ConflictBar data={view} />
+
               {view.summary && (
                 <p className="text-xs text-foreground/90 leading-relaxed">{view.summary}</p>
               )}
@@ -112,7 +210,7 @@ export const BiasTracker = () => {
                 {view.top_left_story && (
                   <div>
                     <div className="text-[10px] font-mono uppercase text-blue-500 mb-0.5">
-                      Pro-US/Israel Narrative
+                      {view.left_label}
                     </div>
                     <p className="text-xs text-foreground/90 leading-snug">{view.top_left_story}</p>
                   </div>
@@ -120,7 +218,7 @@ export const BiasTracker = () => {
                 {view.top_center_story && (
                   <div>
                     <div className="text-[10px] font-mono uppercase text-muted-foreground mb-0.5">
-                      Neutral Narrative
+                      {view.center_label}
                     </div>
                     <p className="text-xs text-foreground/90 leading-snug">{view.top_center_story}</p>
                   </div>
@@ -128,7 +226,7 @@ export const BiasTracker = () => {
                 {view.top_right_story && (
                   <div>
                     <div className="text-[10px] font-mono uppercase text-red-500 mb-0.5">
-                      Pro-Iran Narrative
+                      {view.right_label}
                     </div>
                     <p className="text-xs text-foreground/90 leading-snug">{view.top_right_story}</p>
                   </div>

@@ -8,6 +8,7 @@ import { useLanguage } from "@/i18n/LanguageContext";
 import { useTranslatedData } from "@/hooks/useTranslatedData";
 import { ExpandablePanel } from "./ExpandablePanel";
 import { formatLocalDateTime } from "@/utils/formatTime";
+import { useConflictFilter } from "@/contexts/ConflictFilterContext";
 
 const CHANNELS = [
   { id: "middleeasteye", label: "MEE", color: "bg-blue-500" },
@@ -18,6 +19,9 @@ const CHANNELS = [
   { id: "DDGeopolitics", label: "DDGeo", color: "bg-cyan-500" },
   { id: "thecradlemedia", label: "Cradle", color: "bg-orange-500" },
   { id: "warmonitors", label: "WarMon", color: "bg-rose-500" },
+  { id: "CIG_telegram", label: "CIG", color: "bg-sky-500" },
+  { id: "monitor_the_situation", label: "Monitor", color: "bg-lime-500" },
+  { id: "ukr_leaks_eng", label: "UkrLeaks", color: "bg-yellow-500" },
 ];
 
 interface TelegramMessage {
@@ -30,11 +34,12 @@ interface TelegramMessage {
 export const TelegramPanel = () => {
   const [activeFilters, setActiveFilters] = useState<Set<string>>(new Set(CHANNELS.map((c) => c.id)));
   const { t } = useLanguage();
+  const { conflict } = useConflictFilter();
 
   const { data, isLoading, error } = useQuery({
-    queryKey: ["telegram-feed"],
+    queryKey: ["telegram-feed", conflict],
     queryFn: async () => {
-      const { data, error } = await supabase.functions.invoke("telegram-feed");
+      const { data, error } = await supabase.functions.invoke("telegram-feed", { body: { conflict } });
       if (error) throw error;
       return data as { messages: TelegramMessage[] };
     },

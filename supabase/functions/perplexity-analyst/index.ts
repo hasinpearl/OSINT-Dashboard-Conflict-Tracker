@@ -1,8 +1,9 @@
 import { getCached, setCache } from "../_shared/cache.ts";
 import { logCost, logCacheHit, PRICES } from "../_shared/costs.ts";
 import { corsHeadersFor, errorResponse } from "../_shared/cors.ts";
+import { getConflictConfig, readConflictFromRequest } from "../_shared/conflicts.ts";
 
-const CACHE_KEY = "perplexity-analyst";
+const CACHE_KEY_BASE = "perplexity-analyst";
 const PANEL = "analyst";
 
 Deno.serve(async (req) => {
@@ -12,6 +13,10 @@ Deno.serve(async (req) => {
   }
 
   try {
+    const conflict = await readConflictFromRequest(req);
+    const config = getConflictConfig(conflict);
+    const CACHE_KEY = `${CACHE_KEY_BASE}:${config.key}`;
+
     const cached = await getCached(CACHE_KEY);
     if (cached) {
       logCacheHit(PANEL, "perplexity");
@@ -37,15 +42,15 @@ Deno.serve(async (req) => {
         messages: [
           {
             role: "system",
-            content: "You are a geopolitical research assistant. Find real, recent expert commentary. Return ONLY valid JSON with no markdown.",
+            content: `You are a geopolitical research assistant focused on the ${config.label} conflict in ${config.region}. Find real, recent expert commentary. Return ONLY valid JSON with no markdown.`,
           },
           {
             role: "user",
-            content: `Search for the most recent expert analysis and commentary about Iran, Middle East conflict, US-Iran tensions, Strait of Hormuz, and Gulf security from the past week.
+            content: `Search for the most recent expert analysis and commentary about the ${config.label} conflict (key topics: ${config.searchTerms}) from the past week.
 
-Look for quotes and analysis from think tanks (Brookings, IISS, Carnegie, CFR, Washington Institute, Crisis Group), regional analysts, Foreign Affairs, Foreign Policy, Al Jazeera, Al-Monitor, and Al Arabiya.
+Look for quotes and analysis from major think tanks (Brookings, IISS, Carnegie, CFR, RAND, Chatham House, Crisis Group, Atlantic Council), regional analysts, and outlets like Foreign Affairs, Foreign Policy, The Economist, Al Jazeera, and other reputable regional publications relevant to ${config.region}.
 
-Return JSON: {"comments":[{"analyst":"full name","affiliation":"organization","comment":"their key quote or analysis, 2-3 sentences","topic":"brief topic","timestamp":"ISO 8601 UTC timestamp e.g. 2026-04-28T14:30:00Z","url":"source url if available"}]}. The timestamp MUST be a valid ISO 8601 UTC timestamp e.g. 2026-04-28T14:30:00Z. Do not use relative timestamps. Return 8-15 entries. Mix Western and regional/Arabic analysts.`,
+Return JSON: {"comments":[{"analyst":"full name","affiliation":"organization","comment":"their key quote or analysis, 2-3 sentences","topic":"brief topic","timestamp":"ISO 8601 UTC timestamp e.g. 2026-04-28T14:30:00Z","url":"source url if available"}]}. The timestamp MUST be a valid ISO 8601 UTC timestamp e.g. 2026-04-28T14:30:00Z. Do not use relative timestamps. Return 8-15 entries. Mix Western and regional analysts relevant to ${config.region}.`,
           },
         ],
         search_recency_filter: "week",
@@ -62,7 +67,7 @@ Return JSON: {"comments":[{"analyst":"full name","affiliation":"organization","c
 
     const data = await res.json();
     const content = data.choices?.[0]?.message?.content || "{}";
-    
+
     let parsed;
     try {
       parsed = JSON.parse(content);

@@ -48,12 +48,3 @@ export function formatLocalDate(
   }).format(d);
 }
 
-export function formatLocalTimestamp(
-  input?: string | number | Date | null,
-  locale?: string
-): string {
-  if (typeof input === "string" && DATE_ONLY_RE.test(input)) {
-    return formatLocalDate(input, locale);
-  }
-  return formatLocalDateTime(input, locale);
-}

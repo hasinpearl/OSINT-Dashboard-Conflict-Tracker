@@ -1,20 +1,22 @@
 # HH Dashboards — OSINT Conflict Tracker
 
-Real-time OSINT intelligence dashboard tracking conflict developments in the Middle East, built by Hessa Alhammadi.
+Real-time OSINT intelligence dashboard tracking conflict developments across three major global conflicts, built by Hessa Alhammadi.
 
 ## Features
 
-- **Live News Feed** — aggregated from reputable international outlets
+- **Multi-Conflict Tracking** — filter between Iran/U.S., Ukraine/Russia, China/Taiwan, or view all
+- **Live News Feed** — aggregated from reputable international outlets per conflict region
 - **AI Analyst Panel** — Perplexity-powered intelligence briefings
-- **Telegram Monitor** — tracks 8 geopolitical Telegram channels
+- **Telegram Monitor** — tracks 11 geopolitical Telegram channels
 - **Hot Topics Timeline** — scrape-verified major developments with source attribution
 - **OSINT Panel** — verified intelligence with mandatory source links
-- **Bias Tracker** — content narrative analysis updated every 12 hours
+- **Bias Tracker** — content narrative analysis with per-conflict spectrum (updated every 12h)
 - **Live Coverage** — embedded YouTube live streams (EN/AR)
 - **Bilingual (EN/AR)** — chunked Arabic translation with retry logic
+- **Hourly Audit** — automated cleanup of stale, duplicate, and superseded content
 - **Admin Cost Tracker** — role-protected API spend monitoring
 - **Auth & RBAC** — Supabase auth with admin/user roles and Row Level Security
-- **Smart Caching** — TTL-based with force-refresh support
+- **Smart Caching** — TTL-based with force-refresh support and automatic cache cleanup
 - **Local Timezone** — all timestamps rendered in user's device timezone
 
 ## Tech Stack
