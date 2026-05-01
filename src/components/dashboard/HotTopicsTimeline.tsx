@@ -10,6 +10,12 @@ import { ExpandablePanel } from "./ExpandablePanel";
 import { formatLocalDate } from "@/utils/formatTime";
 import { useConflictFilter } from "@/contexts/ConflictFilterContext";
 
+const SEVERITY_MAP: Record<string, string> = {
+  critical: "critical", high: "high", developing: "developing", verified: "verified", info: "info",
+  "حرج": "critical", "عالي": "high", "قيد التطور": "developing", "موثق": "verified", "تم التحقق": "verified", "معلومات": "info",
+};
+const normSeverity = (s: string) => SEVERITY_MAP[s?.toLowerCase?.()] ?? SEVERITY_MAP[s] ?? "info";
+
 interface HotTopic {
   title: string;
   summary: string;
@@ -47,7 +53,7 @@ export const HotTopicsTimeline = () => {
     refetchInterval: 60 * 60 * 1000,
   });
 
-  const { data: translated, isTranslating } = useTranslatedData(data, "hot-topics");
+  const { data: translated } = useTranslatedData(data, "hot-topics");
 
   const handleManualRefresh = async () => {
     if (isManualRefreshing || isFetching) return;
@@ -86,7 +92,7 @@ export const HotTopicsTimeline = () => {
           </div>
         </div>
         <ScrollArea className="flex-1 p-3">
-          {(isLoading || isTranslating) && (
+          {isLoading && (
             <div className="space-y-3">
               {[...Array(4)].map((_, i) => (
                 <Skeleton key={i} className="h-12 w-full" />
@@ -98,26 +104,26 @@ export const HotTopicsTimeline = () => {
               <p className="text-severity-critical font-mono text-xs">{t("topics.offline")}</p>
             </div>
           )}
-          {translated?.topics && !isTranslating && (
+          {(translated?.topics ?? data?.topics) && !isLoading && (
             <div className="relative">
               <div className="absolute left-2 top-0 bottom-0 w-px bg-border rtl:left-auto rtl:right-2" />
               <div className="space-y-4 pl-6 rtl:pl-0 rtl:pr-6">
-                {[...translated.topics].sort((a, b) => 
+                {[...(translated?.topics ?? data?.topics ?? [])].sort((a, b) => 
                   (b.timestamp || "").localeCompare(a.timestamp || "")
                 ).map((topic, i) => (
                   <div key={i} className="relative">
                     <div className={`absolute -left-[18px] top-1 w-2.5 h-2.5 rounded-full border-2 border-card rtl:left-auto rtl:-right-[18px]`}
                       style={{
-                        backgroundColor: topic.severity === "critical" ? "hsl(var(--severity-critical))" :
-                          topic.severity === "high" ? "hsl(var(--severity-high))" :
-                          topic.severity === "developing" ? "hsl(var(--severity-developing))" :
+                        backgroundColor: normSeverity(topic.severity) === "critical" ? "hsl(var(--severity-critical))" :
+                          normSeverity(topic.severity) === "high" ? "hsl(var(--severity-high))" :
+                          normSeverity(topic.severity) === "developing" ? "hsl(var(--severity-developing))" :
                           "hsl(var(--severity-verified))"
                       }}
                     />
                     <h4 className="text-sm font-semibold leading-tight">{topic.title}</h4>
                     <p className="text-xs text-muted-foreground mt-0.5">{topic.summary}</p>
                     <div className="flex items-center gap-2 mt-1">
-                      <span className={`severity-badge severity-${topic.severity}`}>{t(`severity.${topic.severity}`)}</span>
+                      <span className={`severity-badge severity-${normSeverity(topic.severity)}`}>{t(`severity.${normSeverity(topic.severity)}`)}</span>
                       {topic.source && (
                         <span className="text-[10px] font-mono text-muted-foreground">{topic.source}</span>
                       )}

@@ -9,6 +9,14 @@ import { ExpandablePanel } from "./ExpandablePanel";
 import { formatLocalDateTime } from "@/utils/formatTime";
 import { useConflictFilter } from "@/contexts/ConflictFilterContext";
 
+/** Map possibly-translated severity values back to valid CSS class names */
+const SEVERITY_MAP: Record<string, string> = {
+  critical: "critical", high: "high", developing: "developing", verified: "verified", info: "info",
+  // Arabic translations
+  "حرج": "critical", "عالي": "high", "قيد التطور": "developing", "موثق": "verified", "تم التحقق": "verified", "معلومات": "info",
+};
+const normSeverity = (s: string) => SEVERITY_MAP[s?.toLowerCase?.()] ?? SEVERITY_MAP[s] ?? "info";
+
 interface NewsItem {
   headline: string;
   summary: string;
@@ -33,7 +41,7 @@ export const NewsFeed = () => {
     refetchInterval: 60 * 60 * 1000,
   });
 
-  const { data: translated, isTranslating } = useTranslatedData(data, "news-feed");
+  const { data: translated } = useTranslatedData(data, "news-feed");
 
   return (
     <ExpandablePanel>
@@ -46,7 +54,7 @@ export const NewsFeed = () => {
           <span className="text-[10px] opacity-60">{t("news.subtitle")}</span>
         </div>
         <ScrollArea className="flex-1 p-3">
-          {(isLoading || isTranslating) && (
+          {isLoading && (
             <div className="space-y-3">
               {[...Array(5)].map((_, i) => (
                 <div key={i} className="space-y-2 pb-3 border-b border-border last:border-0">
@@ -63,9 +71,9 @@ export const NewsFeed = () => {
               <p className="mt-1 text-xs">{t("news.error")}</p>
             </div>
           )}
-          {translated?.stories && !isTranslating && (
+          {(translated?.stories ?? data?.stories) && !isLoading && (
             <div className="space-y-3">
-              {translated.stories.map((item, i) => (
+              {(translated?.stories ?? data?.stories ?? []).map((item, i) => (
                 <article key={i} className="pb-3 border-b border-border last:border-0">
                   <div className="flex items-start justify-between gap-2">
                     <h3 className="text-sm font-semibold leading-tight">{item.headline}</h3>
@@ -77,8 +85,8 @@ export const NewsFeed = () => {
                   </div>
                   <p className="text-xs text-muted-foreground mt-1 leading-relaxed">{item.summary}</p>
                   <div className="flex items-center gap-2 mt-2">
-                    <span className={`severity-badge severity-${item.severity}`}>
-                      {t(`severity.${item.severity}`)}
+                    <span className={`severity-badge severity-${normSeverity(item.severity)}`}>
+                      {t(`severity.${normSeverity(item.severity)}`)}
                     </span>
                     <span className="text-[10px] font-mono text-muted-foreground">{item.source}</span>
                     <span className="text-[10px] font-mono text-muted-foreground/60 ml-auto">{formatLocalDateTime(item.timestamp)}</span>

@@ -10,9 +10,9 @@ Real-time OSINT intelligence dashboard tracking conflict developments across thr
 - **Telegram Monitor** — tracks 11 geopolitical Telegram channels
 - **Hot Topics Timeline** — scrape-verified major developments with source attribution
 - **OSINT Panel** — verified intelligence with mandatory source links
-- **Bias Tracker** — content narrative analysis with per-conflict spectrum (updated every 12h)
+- **Bias Tracker** — content narrative analysis with per-conflict spectrum across Western, regional, and non-Western sources (updated every 12h)
 - **Live Coverage** — embedded YouTube live streams (EN/AR)
-- **Bilingual (EN/AR)** — chunked Arabic translation with retry logic
+- **Bilingual (EN/AR)** — chunked Arabic translation with retry logic and protected code keys
 - **Hourly Audit** — automated cleanup of stale, duplicate, and superseded content
 - **Admin Cost Tracker** — role-protected API spend monitoring
 - **Auth & RBAC** — Supabase auth with admin/user roles and Row Level Security

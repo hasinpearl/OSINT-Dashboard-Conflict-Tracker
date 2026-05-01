@@ -1,3 +1,4 @@
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { getCached, setCache } from "../_shared/cache.ts";
 import { logCost, logCacheHit, PRICES } from "../_shared/costs.ts";
 import { corsHeadersFor, errorResponse } from "../_shared/cors.ts";
@@ -5,6 +6,27 @@ import { getConflictConfig, readConflictFromRequest } from "../_shared/conflicts
 
 const CACHE_KEY_BASE = "telegram-feed";
 const PANEL = "telegram";
+const MAX_NEWEST_POST_AGE_MS = 2 * 60 * 60 * 1000; // 2 hours
+
+async function clearAllTelegramCache() {
+  try {
+    const sb = createClient(
+      Deno.env.get("SUPABASE_URL")!,
+      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
+    );
+    const keys = [
+      `${CACHE_KEY_BASE}:all`,
+      `${CACHE_KEY_BASE}:iran-us`,
+      `${CACHE_KEY_BASE}:ukraine-russia`,
+      `${CACHE_KEY_BASE}:china-taiwan`,
+    ];
+    const { error } = await sb.from("api_cache").delete().in("function_name", keys);
+    if (error) console.error("Failed to clear telegram cache:", error);
+    else console.log(`Cleared all telegram-feed cache rows (${keys.join(", ")})`);
+  } catch (e) {
+    console.error("clearAllTelegramCache error:", e);
+  }
+}
 
 const CHANNELS = [
   "middleeasteye",
@@ -124,10 +146,32 @@ Deno.serve(async (req) => {
     if (!forceRefresh) {
       const cached = await getCached(CACHE_KEY);
       if (cached) {
-        logCacheHit(PANEL, "firecrawl");
-        return new Response(JSON.stringify(cached), {
-          headers: { ...cors, "Content-Type": "application/json" },
-        });
+        // Hard staleness check: inspect newest post timestamp
+        const messages = (cached as any)?.messages ?? [];
+        const newestTs = messages
+          .map((m: any) => m?.timestamp)
+          .filter(Boolean)
+          .sort()
+          .reverse()[0];
+
+        if (newestTs) {
+          const newestAgeMs = Date.now() - new Date(newestTs).getTime();
+          const ageHours = (newestAgeMs / (60 * 60 * 1000)).toFixed(2);
+          console.log(`Telegram cache newest post age: ${ageHours}h (key: ${CACHE_KEY})`);
+
+          if (isNaN(newestAgeMs) || newestAgeMs > MAX_NEWEST_POST_AGE_MS) {
+            console.log(`Cache STALE (newest post >2h old) — clearing all telegram-feed cache rows`);
+            await clearAllTelegramCache();
+          } else {
+            logCacheHit(PANEL, "firecrawl");
+            return new Response(JSON.stringify(cached), {
+              headers: { ...cors, "Content-Type": "application/json" },
+            });
+          }
+        } else {
+          console.log(`Telegram cache has no post timestamps — treating as stale`);
+          await clearAllTelegramCache();
+        }
       }
     } else {
       console.log("force_refresh=true, bypassing cache");

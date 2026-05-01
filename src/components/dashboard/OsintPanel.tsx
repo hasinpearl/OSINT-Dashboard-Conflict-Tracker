@@ -22,6 +22,24 @@ const CONFIDENCE_STYLES: Record<string, string> = {
   verified: "severity-verified",
   unverified: "severity-high",
   developing: "severity-developing",
+  // Arabic translations
+  "موثق": "severity-verified",
+  "تم التحقق": "severity-verified",
+  "غير موثق": "severity-high",
+  "قيد التطور": "severity-developing",
+};
+
+const normConfidence = (c: string): string => {
+  const map: Record<string, string> = {
+    verified: "verified", unverified: "unverified", developing: "developing",
+    "موثق": "verified", "تم التحقق": "verified", "غير موثق": "unverified", "قيد التطور": "developing",
+  };
+  return map[c] ?? "developing";
+};
+
+const isNoDataPlaceholder = (items: OsintItem[]) => {
+  if (items.length !== 1) return false;
+  return /(no recent|no data|not available)/i.test(items[0]?.title ?? "");
 };
 
 export const OsintPanel = () => {
@@ -39,7 +57,7 @@ export const OsintPanel = () => {
     refetchInterval: 60 * 60 * 1000,
   });
 
-  const { data: translated, isTranslating } = useTranslatedData(data, "osint");
+  const { data: translated } = useTranslatedData(data, "osint");
 
   return (
     <ExpandablePanel>
@@ -52,7 +70,7 @@ export const OsintPanel = () => {
           <span className="text-[10px] opacity-60">{t("osint.subtitle")}</span>
         </div>
         <ScrollArea className="flex-1 p-3">
-          {(isLoading || isTranslating) && (
+          {isLoading && (
             <div className="space-y-3">
               {[...Array(4)].map((_, i) => (
                 <Skeleton key={i} className="h-16 w-full" />
@@ -64,9 +82,25 @@ export const OsintPanel = () => {
               <p className="text-severity-critical font-mono text-xs">{t("osint.offline")}</p>
             </div>
           )}
-          {translated?.items && !isTranslating && (
+          {(() => {
+            const rawItems = translated?.items ?? data?.items ?? [];
+            if (!isLoading && isNoDataPlaceholder(rawItems)) {
+              return (
+                <div className="space-y-3">
+                  {[...Array(3)].map((_, i) => (
+                    <Skeleton key={i} className="h-16 w-full" />
+                  ))}
+                  <p className="text-xs text-muted-foreground text-center">Updating...</p>
+                </div>
+              );
+            }
+            // Filter out placeholder/error items from Perplexity
+            const items = rawItems.filter((item: OsintItem) =>
+              !/(no .*(reports?|results?|data) available|unable to retrieve|couldn'?t find)/i.test(item.title ?? "")
+            );
+            return items.length > 0 && !isLoading ? (
             <div className="space-y-3">
-              {[...translated.items].sort((a, b) => {
+              {[...items].sort((a: OsintItem, b: OsintItem) => {
                 const at = a.timestamp ? new Date(a.timestamp).getTime() : 0;
                 const bt = b.timestamp ? new Date(b.timestamp).getTime() : 0;
                 return bt - at;
@@ -75,8 +109,8 @@ export const OsintPanel = () => {
                   <h3 className="text-sm font-semibold leading-tight">{item.title}</h3>
                   <p className="text-xs text-muted-foreground mt-1">{item.summary}</p>
                   <div className="flex items-center gap-2 mt-2">
-                    <span className={`severity-badge ${CONFIDENCE_STYLES[item.confidence]}`}>
-                      {t(`confidence.${item.confidence}`)}
+                    <span className={`severity-badge ${CONFIDENCE_STYLES[item.confidence] ?? "severity-developing"}`}>
+                      {t(`confidence.${normConfidence(item.confidence)}`)}
                     </span>
                     <span className="text-[10px] font-mono text-muted-foreground">{item.source}</span>
                     {item.url && (
@@ -96,7 +130,8 @@ export const OsintPanel = () => {
                 </div>
               ))}
             </div>
-          )}
+            ) : null;
+          })()}
         </ScrollArea>
       </div>
     </ExpandablePanel>

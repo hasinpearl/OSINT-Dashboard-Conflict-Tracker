@@ -47,14 +47,6 @@
     --panel-header: 184 100% 32%;
     --panel-header-foreground: 40 20% 97%;
 
-    --sidebar-background: 0 0% 98%;
-    --sidebar-foreground: 240 5.3% 26.1%;
-    --sidebar-primary: 240 5.9% 10%;
-    --sidebar-primary-foreground: 0 0% 98%;
-    --sidebar-accent: 240 4.8% 95.9%;
-    --sidebar-accent-foreground: 240 5.9% 10%;
-    --sidebar-border: 220 13% 91%;
-    --sidebar-ring: 217.2 91.2% 59.8%;
   }
 
   .dark {
@@ -97,14 +89,6 @@
     --panel-header: 184 100% 30%;
     --panel-header-foreground: 40 20% 97%;
 
-    --sidebar-background: 226 30% 12%;
-    --sidebar-foreground: 40 15% 85%;
-    --sidebar-primary: 184 100% 45%;
-    --sidebar-primary-foreground: 226 43% 12%;
-    --sidebar-accent: 226 25% 20%;
-    --sidebar-accent-foreground: 40 20% 95%;
-    --sidebar-border: 226 20% 25%;
-    --sidebar-ring: 184 100% 45%;
   }
 }
 
@@ -164,27 +148,37 @@
     color: hsl(var(--brand-accent) / 0.95);
     border-bottom: 1px solid hsl(var(--brand-accent) / 0.25);
   }
-  .severity-badge {
-    @apply inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider font-mono;
-  }
-  .severity-critical {
-    background-color: hsl(var(--severity-critical) / 0.15);
-    color: hsl(var(--severity-critical));
-    border: 1px solid hsl(var(--severity-critical) / 0.3);
-  }
-  .severity-high {
-    background-color: hsl(var(--severity-high) / 0.15);
-    color: hsl(var(--severity-high));
-    border: 1px solid hsl(var(--severity-high) / 0.3);
-  }
-  .severity-developing {
-    background-color: hsl(var(--severity-developing) / 0.15);
-    color: hsl(var(--severity-developing));
-    border: 1px solid hsl(var(--severity-developing) / 0.3);
-  }
-  .severity-verified {
-    background-color: hsl(var(--severity-verified) / 0.15);
-    color: hsl(var(--severity-verified));
-    border: 1px solid hsl(var(--severity-verified) / 0.3);
-  }
+}
+
+/* Severity badges — outside @layer to ensure they are not overridden by utilities */
+.severity-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-family: 'Space Grotesk', monospace;
+}
+.severity-critical {
+  background-color: hsl(var(--severity-critical) / 0.15) !important;
+  color: hsl(var(--severity-critical)) !important;
+  border: 1px solid hsl(var(--severity-critical) / 0.3) !important;
+}
+.severity-high {
+  background-color: hsl(var(--severity-high) / 0.15) !important;
+  color: hsl(var(--severity-high)) !important;
+  border: 1px solid hsl(var(--severity-high) / 0.3) !important;
+}
+.severity-developing {
+  background-color: hsl(var(--severity-developing) / 0.15) !important;
+  color: hsl(var(--severity-developing)) !important;
+  border: 1px solid hsl(var(--severity-developing) / 0.3) !important;
+}
+.severity-verified {
+  background-color: hsl(var(--severity-verified) / 0.15) !important;
+  color: hsl(var(--severity-verified)) !important;
+  border: 1px solid hsl(var(--severity-verified) / 0.3) !important;
 }

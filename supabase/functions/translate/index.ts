@@ -6,6 +6,15 @@ const MAX_PAYLOAD_BYTES = 50_000; // 50 KB cap on translation input
 const CHUNK_SIZE = 6; // number of leaf string values per AI call
 const MODEL = "google/gemini-2.5-flash";
 
+// Keys whose values must NEVER be translated (used as CSS classes, code identifiers, etc.)
+const PROTECTED_KEYS = new Set([
+  "severity", "confidence", "mode", "conflict", "key", "type", "status",
+  "source", "coverage_spectrum",
+  "left_label", "center_label", "right_label",
+  "biasLeftLabel", "biasRightLabel", "biasCenterLabel",
+  "timestamp", "last_updated", "cached_at", "url",
+]);
+
 type Path = (string | number)[];
 interface Leaf {
   path: Path;
@@ -39,6 +48,7 @@ function collectLeaves(node: unknown, path: Path, out: Leaf[]): void {
   }
   if (node && typeof node === "object") {
     for (const [k, v] of Object.entries(node)) {
+      if (PROTECTED_KEYS.has(k)) continue;
       collectLeaves(v, [...path, k], out);
     }
   }

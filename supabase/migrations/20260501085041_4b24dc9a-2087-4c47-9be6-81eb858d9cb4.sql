@@ -1,0 +1,1 @@
+DELETE FROM api_cache WHERE function_name LIKE 'bias-tracker%';

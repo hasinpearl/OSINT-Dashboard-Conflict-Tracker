@@ -62,13 +62,13 @@ const SpectrumBar = ({
   return (
     <div className="flex h-3 w-full rounded-sm overflow-hidden bg-muted border border-border">
       {l > 0 && (
-        <div className="bg-blue-600" style={{ width: `${l}%` }} title={`${leftLabel} ${l.toFixed(0)}%`} />
+        <div className="bg-[#3B82F6]" style={{ width: `${l}%` }} title={`${leftLabel} ${l.toFixed(0)}%`} />
       )}
       {c > 0 && (
-        <div className="bg-gray-400" style={{ width: `${c}%` }} title={`${centerLabel} ${c.toFixed(0)}%`} />
+        <div className="bg-[#DBDBDB] dark:bg-[#6B7280]" style={{ width: `${c}%` }} title={`${centerLabel} ${c.toFixed(0)}%`} />
       )}
       {r > 0 && (
-        <div className="bg-red-600" style={{ width: `${r}%` }} title={`${rightLabel} ${r.toFixed(0)}%`} />
+        <div className="bg-[#EF4444]" style={{ width: `${r}%` }} title={`${rightLabel} ${r.toFixed(0)}%`} />
       )}
     </div>
   );
@@ -103,9 +103,9 @@ const ConflictBar = ({
       rightLabel={data.right_label}
     />
     <div className="flex justify-between text-[11px] font-mono">
-      <span className="text-blue-500">{Math.round(data.left_pct)}%</span>
-      <span className="text-muted-foreground">{Math.round(data.center_pct)}%</span>
-      <span className="text-red-500">{Math.round(data.right_pct)}%</span>
+      <span className="text-[#3B82F6]">{Math.round(data.left_pct)}%</span>
+      <span className="text-[#DBDBDB] dark:text-[#9CA3AF]">{Math.round(data.center_pct)}%</span>
+      <span className="text-[#EF4444]">{Math.round(data.right_pct)}%</span>
     </div>
   </div>
 );
@@ -134,7 +134,7 @@ export const BiasTracker = () => {
     refetchInterval: 12 * 60 * 60 * 1000,
   });
 
-  const { data: translated, isTranslating } = useTranslatedData(data, "bias-tracker");
+  const { data: translated } = useTranslatedData(data, "bias-tracker");
   const view = (translated ?? data) as BiasResponse | undefined;
 
   const lastAnalyzed = view?.last_updated
@@ -152,7 +152,7 @@ export const BiasTracker = () => {
           <span className="text-[10px] opacity-60">{t("bias.subtitle")}</span>
         </div>
         <ScrollArea className="flex-1 p-3">
-          {(isLoading || isTranslating) && (
+          {isLoading && (
             <div className="space-y-3">
               <Skeleton className="h-3 w-full" />
               <Skeleton className="h-4 w-3/4" />
@@ -166,7 +166,7 @@ export const BiasTracker = () => {
             </div>
           )}
 
-          {view && view.mode === "all" && !isLoading && !isTranslating && (
+          {view && view.mode === "all" && !isLoading && (
             <div className="space-y-4">
               <div className="space-y-4">
                 {view.conflicts.map((c) => (
@@ -197,7 +197,7 @@ export const BiasTracker = () => {
             </div>
           )}
 
-          {view && view.mode === "single" && !isLoading && !isTranslating && (
+          {view && view.mode === "single" && !isLoading && (
             <div className="space-y-4">
               <ConflictBar data={view} />
 
@@ -209,7 +209,7 @@ export const BiasTracker = () => {
               <div className="space-y-2 pt-2 border-t border-border">
                 {view.top_left_story && (
                   <div>
-                    <div className="text-[10px] font-mono uppercase text-blue-500 mb-0.5">
+                    <div className="text-[10px] font-mono uppercase text-[#3B82F6] mb-0.5">
                       {view.left_label}
                     </div>
                     <p className="text-xs text-foreground/90 leading-snug">{view.top_left_story}</p>
@@ -225,7 +225,7 @@ export const BiasTracker = () => {
                 )}
                 {view.top_right_story && (
                   <div>
-                    <div className="text-[10px] font-mono uppercase text-red-500 mb-0.5">
+                    <div className="text-[10px] font-mono uppercase text-[#EF4444] mb-0.5">
                       {view.right_label}
                     </div>
                     <p className="text-xs text-foreground/90 leading-snug">{view.top_right_story}</p>

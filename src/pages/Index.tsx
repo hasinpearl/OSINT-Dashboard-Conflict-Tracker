@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { DashboardHeader } from "@/components/dashboard/DashboardHeader";
@@ -12,16 +12,41 @@ import { AnalystPanel } from "@/components/dashboard/AnalystPanel";
 import { ConflictFilter } from "@/components/dashboard/ConflictFilter";
 import { useLanguage } from "@/i18n/LanguageContext";
 
+const PANEL_FUNCTIONS = [
+  "firecrawl-news",
+  "telegram-feed",
+  "ai-summarize",
+  "perplexity-osint",
+  "perplexity-analyst",
+  "bias-tracker",
+];
+
 const Index = () => {
   const [isLoading, setIsLoading] = useState(false);
   const queryClient = useQueryClient();
   const { isRTL, t } = useLanguage();
+  const hasForcedRef = useRef(false);
 
   const handleRefresh = useCallback(() => {
     setIsLoading(true);
     queryClient.refetchQueries({ stale: true });
     setTimeout(() => setIsLoading(false), 3000);
   }, [queryClient]);
+
+  // One-time force_refresh on mount to repopulate all panels with fresh data
+  useEffect(() => {
+    if (hasForcedRef.current) return;
+    hasForcedRef.current = true;
+    PANEL_FUNCTIONS.forEach((fn) => {
+      supabase.functions
+        .invoke(fn, { body: { force_refresh: true } })
+        .then(({ error }) => {
+          if (error) console.warn(`[force_refresh] ${fn} error:`, error);
+          else console.log(`[force_refresh] ${fn} done`);
+        })
+        .catch((e) => console.warn(`[force_refresh] ${fn} exception:`, e));
+    });
+  }, []);
 
   // Hourly audit — fire-and-forget
   useEffect(() => {
@@ -46,7 +71,7 @@ const Index = () => {
             <DashboardHeader onRefresh={handleRefresh} isLoading={isLoading} />
           </div>
         </div>
-        <main className="h-full overflow-hidden p-2 pt-[5.5rem] sm:pt-[6rem] flex flex-col">
+        <main className="h-full overflow-hidden p-2 pt-[7rem] sm:pt-[7.5rem] flex flex-col">
           <div className="shrink-0 mb-2">
             <ConflictFilter />
           </div>
@@ -81,7 +106,7 @@ const Index = () => {
       </div>
       <footer className="border-t border-white/30 bg-white/10 backdrop-blur-xl backdrop-saturate-150 px-4 py-3 text-[10px] font-mono flex items-center justify-between">
         <div className="flex flex-col gap-0.5">
-          <span className="text-foreground font-bold">© {new Date().getFullYear()} Hessa Alhammadi. {t("footer.copyright")}</span>
+          <span className="text-foreground font-bold">© {new Date().getFullYear()} <a href="https://hessaa.net" target="_blank" rel="noopener noreferrer" className="underline hover:text-primary transition-colors">Hessa Al Hammadi</a>. {t("footer.copyright")}</span>
           {isRTL && (
             <span className="text-amber-600 font-bold text-[9px]">
               ⚠ الترجمات تتم تلقائيًا بواسطة الذكاء الاصطناعي وقد لا تكون دقيقة بالكامل

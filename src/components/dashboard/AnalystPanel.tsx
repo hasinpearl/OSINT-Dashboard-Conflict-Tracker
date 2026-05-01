@@ -33,7 +33,7 @@ export const AnalystPanel = () => {
     refetchInterval: 60 * 60 * 1000,
   });
 
-  const { data: translated, isTranslating } = useTranslatedData(data, "analyst");
+  const { data: translated } = useTranslatedData(data, "analyst");
 
   return (
     <ExpandablePanel>
@@ -46,7 +46,7 @@ export const AnalystPanel = () => {
           <span className="text-[10px] opacity-60">{t("analyst.subtitle")}</span>
         </div>
         <ScrollArea className="flex-1 p-3">
-          {(isLoading || isTranslating) && (
+          {isLoading && (
             <div className="space-y-3">
               {[...Array(3)].map((_, i) => (
                 <Skeleton key={i} className="h-20 w-full" />
@@ -58,15 +58,17 @@ export const AnalystPanel = () => {
               <p className="text-severity-critical font-mono text-xs">{t("analyst.offline")}</p>
             </div>
           )}
-          {translated?.comments && !isTranslating && translated.comments.length === 0 && (
+          {(translated?.comments ?? data?.comments) && (translated?.comments ?? data?.comments)!.length === 0 && !isLoading && (
             <div className="text-sm text-muted-foreground p-4 text-center">
               <p className="text-xs font-mono">No analyst commentary available right now</p>
               <p className="text-[10px] mt-1">Try refreshing in a few minutes</p>
             </div>
           )}
-          {translated?.comments && !isTranslating && translated.comments.length > 0 && (
+          {(() => {
+            const comments = translated?.comments ?? data?.comments;
+            return comments && comments.length > 0 && !isLoading ? (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-              {translated.comments.map((item, i) => (
+              {comments.map((item, i) => (
                 <div key={i} className="p-3 bg-muted/50 rounded-sm border border-border">
                   <div className="flex items-center gap-2 mb-2">
                     <div className="w-7 h-7 rounded-full bg-primary/10 flex items-center justify-center">
@@ -102,7 +104,8 @@ export const AnalystPanel = () => {
                 </div>
               ))}
             </div>
-          )}
+            ) : null;
+          })()}
         </ScrollArea>
       </div>
     </ExpandablePanel>

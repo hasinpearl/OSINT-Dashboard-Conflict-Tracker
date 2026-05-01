@@ -32,7 +32,7 @@ const buildEmbedUrl = (videoId: string, muted: boolean) =>
   `https://www.youtube.com/embed/${videoId}?autoplay=1&mute=${muted ? 1 : 0}&playsinline=1`;
 
 export const LiveCoverage = () => {
-  const { t, isRTL } = useLanguage();
+  const { t } = useLanguage();
   const [activeIds, setActiveIds] = useState<string[]>(["bloomberg"]);
   const [layout, setLayout] = useState<LayoutMode>(1);
   const [muted, setMuted] = useState(true);
@@ -71,7 +71,6 @@ export const LiveCoverage = () => {
     <ExpandablePanel>
       <LiveCoverageInner
         t={t}
-        isRTL={isRTL}
         activeIds={activeIds}
         layout={layout}
         muted={muted}
@@ -85,7 +84,6 @@ export const LiveCoverage = () => {
 
 interface InnerProps {
   t: (k: string) => string;
-  isRTL: boolean;
   activeIds: string[];
   layout: LayoutMode;
   muted: boolean;

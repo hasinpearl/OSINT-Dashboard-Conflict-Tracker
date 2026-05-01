@@ -1,3 +1,4 @@
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { getCached, setCache } from "../_shared/cache.ts";
 import { logCost, logCacheHit, PRICES } from "../_shared/costs.ts";
 import { corsHeadersFor, errorResponse } from "../_shared/cors.ts";
@@ -5,6 +6,26 @@ import { getConflictConfig, readConflictFromRequest } from "../_shared/conflicts
 
 const CACHE_KEY_BASE = "perplexity-osint";
 const PANEL = "osint";
+
+/** Read stale cached data ignoring TTL — used as fallback when fresh fetch returns nothing. */
+async function getStaleCached(cacheKey: string): Promise<any | null> {
+  try {
+    const sb = createClient(
+      Deno.env.get("SUPABASE_URL")!,
+      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+    );
+    const { data, error } = await sb
+      .from("api_cache")
+      .select("response_data")
+      .eq("function_name", cacheKey)
+      .single();
+    if (error || !data?.response_data) return null;
+    const { cached_at, ...rest } = data.response_data;
+    return rest;
+  } catch {
+    return null;
+  }
+}
 
 Deno.serve(async (req) => {
   const cors = corsHeadersFor(req);
@@ -18,7 +39,9 @@ Deno.serve(async (req) => {
     const CACHE_KEY = `${CACHE_KEY_BASE}:${config.key}`;
 
     const cached = await getCached(CACHE_KEY);
-    if (cached) {
+    const cachedItems = Array.isArray(cached?.items) ? cached.items : [];
+    const cachedHasItems = cachedItems.length > 0;
+    if (cachedHasItems) {
       logCacheHit(PANEL, "perplexity");
       return new Response(JSON.stringify(cached), {
         headers: { ...cors, "Content-Type": "application/json" },
@@ -46,17 +69,18 @@ Deno.serve(async (req) => {
           },
           {
             role: "user",
-            content: `Search for the latest OSINT intelligence on military and security activities in ${config.region} relevant to the ${config.label} conflict (key topics: ${config.searchTerms}) from sources like Bellingcat, OSINT Defender, Janes Defence, and reputable verified analysts on X/Twitter. Return JSON: {"items":[{"title":"...","summary":"2 sentences","source":"source name","confidence":"verified|unverified|developing","timestamp":"ISO 8601 UTC timestamp e.g. 2026-04-28T14:30:00Z","url":"https://..."}]}. The timestamp MUST be a valid ISO 8601 UTC timestamp e.g. 2026-04-28T14:30:00Z. Do not use relative timestamps. Return the top 6 most significant items from the last 48 hours. Every item MUST include a valid, clickable source URL from the original report. If you cannot provide a verified source URL for an item, do not include that item.`,
+            content: `Find the top 6 verified OSINT intelligence items about ${config.label} from open sources such as Bellingcat, OSINT Defender, Janes Defence, and X/Twitter analysts. Include the most recent items available. Each item MUST have a valid source URL. Do NOT return a message saying no data is available — always return your best findings even if they are older. Focus on military and security activities in ${config.region} relevant to the ${config.label} conflict (key topics: ${config.searchTerms}). Return ONLY JSON: {"items":[{"title":"...","summary":"2 sentences","source":"source name","confidence":"verified|unverified|developing","timestamp":"ISO 8601 UTC timestamp e.g. 2026-04-28T14:30:00Z","url":"https://..."}]}. The timestamp MUST be a valid ISO 8601 UTC timestamp e.g. 2026-04-28T14:30:00Z. Do not use relative timestamps. Every item MUST include a valid, clickable source URL from the original report. If you cannot provide a verified source URL for an item, do not include that item.`,
           },
         ],
         search_domain_filter: ["bellingcat.com", "janes.com", "twitter.com"],
-        search_recency_filter: "day",
       }),
     });
 
     if (!res.ok) {
       console.error("Perplexity error:", await res.text());
-      return new Response(JSON.stringify({ items: [] }), {
+      // Return cached data (even stale) if available, otherwise empty
+      const fallback = cached ?? await getStaleCached(CACHE_KEY);
+      return new Response(JSON.stringify(fallback ?? { items: [] }), {
         headers: { ...cors, "Content-Type": "application/json" },
       });
     }
@@ -64,12 +88,18 @@ Deno.serve(async (req) => {
     const data = await res.json();
     const content = data.choices?.[0]?.message?.content || "{}";
 
-    let parsed: { items?: any[] };
+    let parsed: { items?: any[] } = { items: [] };
     try {
       parsed = JSON.parse(content);
     } catch {
       const match = content.match(/```(?:json)?\s*([\s\S]*?)```/);
-      parsed = match ? JSON.parse(match[1]) : { items: [] };
+      if (match) {
+        try {
+          parsed = JSON.parse(match[1]);
+        } catch {
+          parsed = { items: [] };
+        }
+      }
     }
 
     // Filter out items without a valid URL
@@ -80,11 +110,19 @@ Deno.serve(async (req) => {
       }),
     };
 
+    // Only overwrite cache when we have actual items; otherwise keep old cached data
     if (filtered.items.length > 0) {
       await setCache(CACHE_KEY, filtered);
+      return new Response(JSON.stringify(filtered), {
+        headers: { ...cors, "Content-Type": "application/json" },
+      });
     }
 
-    return new Response(JSON.stringify(filtered), {
+    // No valid items — return stale cached data (ignoring TTL) if it exists
+    const fallbackCached = cachedHasItems ? cached : await getStaleCached(CACHE_KEY);
+    const response = fallbackCached ?? filtered;
+    console.log(`perplexity-osint: no new items, ${fallbackCached ? "using stale cache" : "returning empty"}`);
+    return new Response(JSON.stringify(response), {
       headers: { ...cors, "Content-Type": "application/json" },
     });
   } catch (error) {

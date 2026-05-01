@@ -47,7 +47,7 @@ export const TelegramPanel = () => {
     refetchInterval: 60 * 60 * 1000,
   });
 
-  const { data: translated, isTranslating } = useTranslatedData(data, "telegram-feed");
+  const { data: translated } = useTranslatedData(data, "telegram-feed");
 
   const toggleFilter = (channelId: string) => {
     setActiveFilters((prev) => {
@@ -58,7 +58,8 @@ export const TelegramPanel = () => {
     });
   };
 
-  const filtered = translated?.messages?.filter((m) => activeFilters.has(m.channel)) ?? [];
+  const messages = translated?.messages ?? data?.messages;
+  const filtered = messages?.filter((m) => activeFilters.has(m.channel)) ?? [];
   const getChannelMeta = (id: string) => CHANNELS.find((c) => c.id === id);
 
   return (
@@ -85,7 +86,7 @@ export const TelegramPanel = () => {
           ))}
         </div>
         <ScrollArea className="flex-1 p-3">
-          {(isLoading || isTranslating) && (
+          {isLoading && (
             <div className="space-y-3">
               {[...Array(6)].map((_, i) => (
                 <div key={i} className="space-y-1">
@@ -101,7 +102,7 @@ export const TelegramPanel = () => {
               <p className="mt-1 text-xs">{t("telegram.error")}</p>
             </div>
           )}
-          {!isTranslating && filtered.length > 0 && (
+          {!isLoading && filtered.length > 0 && (
             <div className="space-y-2.5">
               {filtered.map((msg, i) => {
                 const ch = getChannelMeta(msg.channel);
@@ -122,7 +123,7 @@ export const TelegramPanel = () => {
               })}
             </div>
           )}
-          {!isLoading && !isTranslating && !error && filtered.length === 0 && (
+          {!isLoading && !error && filtered.length === 0 && (
             <p className="text-xs text-muted-foreground text-center py-4 font-mono">{t("telegram.noMessages")}</p>
           )}
         </ScrollArea>

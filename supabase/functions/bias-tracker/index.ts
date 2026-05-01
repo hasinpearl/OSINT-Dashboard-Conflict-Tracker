@@ -89,8 +89,36 @@ const num = (v: unknown, d = 0): number => {
 };
 const str = (v: unknown, d = ""): string => (typeof v === "string" ? v : d);
 
+// Phrases that indicate Perplexity is complaining about data limitations
+const LIMITATION_PHRASES = /only found|couldn'?t find|limited results|not enough|fewer than|unable to (find|retrieve|locate)|no (search )?results|could not find/i;
+
+function cleanSummary(summary: string): string {
+  if (!summary || !LIMITATION_PHRASES.test(summary)) return summary;
+  // Strip sentences containing limitation language
+  const cleaned = summary
+    .split(/(?<=[.!?])\s+/)
+    .filter((s) => !LIMITATION_PHRASES.test(s))
+    .join(" ")
+    .trim();
+  return cleaned.length > 20 ? cleaned : summary;
+}
+
 async function analyzeOne(perplexityKey: string, config: ConflictConfig): Promise<BiasData | null> {
-  const userPrompt = `Analyze the top 20 news stories about the ${config.label} conflict (key topics: ${config.searchTerms}) from the past 7 days. For each story, classify its NARRATIVE — not the outlet, but what the story itself supports:
+  const userPrompt = `Analyze up to 20 news stories about the ${config.label} conflict (key topics: ${config.searchTerms}) from the past 7 days. If fewer than 20 stories are available, analyze however many you find — even 5-6 stories is enough for a meaningful bias breakdown. Base your percentages on whatever stories are available. Do NOT mention that you couldn't find 20 stories. Do NOT include meta-commentary about the search results or limitations. Just provide the analysis based on what is available.
+
+Search for coverage across ALL of these source categories:
+- Western outlets: Reuters, BBC, CNN, Fox News, NYT, Washington Post, AP, Bloomberg, Sky News
+- Russian/Eastern European outlets: RT, TASS, Sputnik, Interfax
+- Chinese/East Asian outlets: Xinhua, Global Times, CGTN, South China Morning Post
+- Iranian outlets: Press TV, IRNA, Tehran Times, Mehr News, Tasnim News
+- Middle Eastern/Gulf outlets: Al Jazeera, Al Arabiya, Al Mayadeen, TRT World, Middle East Eye, The National (UAE), Gulf News, Arab News
+- International/multilateral: France24, DW, NHK, ABC Australia
+
+You MUST include stories from non-Western sources in your analysis. If a story is only covered by one side, still count it. The goal is to capture the FULL global narrative spectrum, not just the Western perspective.
+
+Important: 0% for any category is almost never accurate in a real conflict. Even if one side dominates, there is always counter-narrative coverage. If your initial analysis produces 0% for any category, search harder for regional and non-Western sources and re-analyze before returning results.
+
+For each story, classify its NARRATIVE — not the outlet, but what the story itself supports:
 
 - LEFT (${config.biasLeftLabel} side): Stories that frame ${config.biasLeftLabel} actions as justified, defensive, or necessary. Stories critical of ${config.biasRightLabel}'s actions. Stories emphasizing aggression or threats from ${config.biasRightLabel}.
 
@@ -98,11 +126,11 @@ async function analyzeOne(perplexityKey: string, config: ConflictConfig): Promis
 
 - RIGHT (${config.biasRightLabel} side): Stories that frame ${config.biasRightLabel}'s actions as defensive or justified. Stories critical of ${config.biasLeftLabel}'s actions, sanctions, or military presence. Stories emphasizing civilian casualties caused by ${config.biasLeftLabel}. Stories sympathetic to ${config.biasRightLabel}'s sovereignty arguments.
 
-Count how many of the 20 stories fall into each category. Calculate the percentage for each.
+Count how many stories fall into each category. Calculate the percentage for each.
 
 Return ONLY this JSON:
 
-{"total_stories":20,"left_count":number,"center_count":number,"right_count":number,"left_pct":number,"center_pct":number,"right_pct":number,"summary":"2-3 sentences explaining the current narrative landscape — what is dominating the conversation and which direction coverage is leaning","top_left_story":"headline of strongest ${config.biasLeftLabel}-sympathetic story","top_center_story":"headline of most neutral story","top_right_story":"headline of strongest ${config.biasRightLabel}-sympathetic story","last_updated":"ISO 8601 UTC timestamp"}`;
+{"total_stories":number,"left_count":number,"center_count":number,"right_count":number,"left_pct":number,"center_pct":number,"right_pct":number,"summary":"2-3 sentences explaining the current narrative landscape — what is dominating the conversation and which direction coverage is leaning","top_left_story":"headline of strongest ${config.biasLeftLabel}-sympathetic story","top_center_story":"headline of most neutral story","top_right_story":"headline of strongest ${config.biasRightLabel}-sympathetic story","last_updated":"ISO 8601 UTC timestamp"}`;
 
   logCost({ panel: PANEL, provider: "perplexity", model: "sonar-pro", costUsd: PRICES.perplexity_sonar_pro });
   const aiRes = await fetch("https://api.perplexity.ai/chat/completions", {
@@ -156,7 +184,7 @@ Return ONLY this JSON:
     left_pct: num(parsed.left_pct),
     center_pct: num(parsed.center_pct),
     right_pct: num(parsed.right_pct),
-    summary: str(parsed.summary),
+    summary: cleanSummary(str(parsed.summary)),
     top_left_story: str(parsed.top_left_story),
     top_center_story: str(parsed.top_center_story),
     top_right_story: str(parsed.top_right_story),

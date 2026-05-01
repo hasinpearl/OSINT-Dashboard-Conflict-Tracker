@@ -40,8 +40,8 @@ export const CONFLICT_CONFIG: Record<Exclude<ConflictKey, "all">, ConflictConfig
       "Ukraine, Russia, Donbas, Crimea, NATO, Zelensky, Putin, Black Sea, Ukrainian counteroffensive, Russian invasion",
     label: "Ukraine / Russia",
     region: "Eastern Europe",
-    biasLeftLabel: "Pro-Ukraine / West",
-    biasRightLabel: "Pro-Russia",
+    biasLeftLabel: "Ukraine / West",
+    biasRightLabel: "Russia",
     biasCenterLabel: "Neutral / International",
     newsSources: [
       "https://www.reuters.com/world/europe/",
@@ -57,8 +57,8 @@ export const CONFLICT_CONFIG: Record<Exclude<ConflictKey, "all">, ConflictConfig
       "China, Taiwan, South China Sea, Xi Jinping, Taiwan Strait, PLA, AUKUS, Indo-Pacific, Chinese military, semiconductor",
     label: "China / Taiwan",
     region: "Indo-Pacific",
-    biasLeftLabel: "Pro-Taiwan / West",
-    biasRightLabel: "Pro-China",
+    biasLeftLabel: "Taiwan / West",
+    biasRightLabel: "China",
     biasCenterLabel: "Neutral / International",
     newsSources: [
       "https://www.reuters.com/world/asia-pacific/",
