@@ -29,7 +29,6 @@ export const HotTopicsTimeline = () => {
   const { t } = useLanguage();
   const queryClient = useQueryClient();
   const { conflict } = useConflictFilter();
-  // Force a fresh fetch on the first request after page load.
   const initialLoadRef = useRef(true);
   const forceNextRef = useRef(false);
   const [isManualRefreshing, setIsManualRefreshing] = useState(false);
@@ -60,7 +59,6 @@ export const HotTopicsTimeline = () => {
     setIsManualRefreshing(true);
     forceNextRef.current = true;
     try {
-      // Invalidate to ensure refetch runs queryFn
       await queryClient.invalidateQueries({ queryKey: ["hot-topics"] });
       await refetch();
     } finally {

@@ -20,7 +20,6 @@ interface BiasData {
   top_center_story: string;
   top_right_story: string;
   last_updated: string;
-  // Labels travel with the data so the frontend doesn't hardcode them
   left_label: string;
   center_label: string;
   right_label: string;
@@ -89,12 +88,10 @@ const num = (v: unknown, d = 0): number => {
 };
 const str = (v: unknown, d = ""): string => (typeof v === "string" ? v : d);
 
-// Phrases that indicate Perplexity is complaining about data limitations
 const LIMITATION_PHRASES = /only found|couldn'?t find|limited results|not enough|fewer than|unable to (find|retrieve|locate)|no (search )?results|could not find/i;
 
 function cleanSummary(summary: string): string {
   if (!summary || !LIMITATION_PHRASES.test(summary)) return summary;
-  // Strip sentences containing limitation language
   const cleaned = summary
     .split(/(?<=[.!?])\s+/)
     .filter((s) => !LIMITATION_PHRASES.test(s))
@@ -104,7 +101,7 @@ function cleanSummary(summary: string): string {
 }
 
 async function analyzeOne(perplexityKey: string, config: ConflictConfig): Promise<BiasData | null> {
-  const userPrompt = `Analyze up to 20 news stories about the ${config.label} conflict (key topics: ${config.searchTerms}) from the past 7 days. If fewer than 20 stories are available, analyze however many you find — even 5-6 stories is enough for a meaningful bias breakdown. Base your percentages on whatever stories are available. Do NOT mention that you couldn't find 20 stories. Do NOT include meta-commentary about the search results or limitations. Just provide the analysis based on what is available.
+  const userPrompt = `Analyze up to 20 news stories about the ${config.label} conflict (key topics: ${config.searchTerms}) from the past 7 days. If fewer than 20 stories are available, analyze however many you find - even 5-6 stories is enough for a meaningful bias breakdown. Base your percentages on whatever stories are available. Do NOT mention that you couldn't find 20 stories. Do NOT include meta-commentary about the search results or limitations. Just provide the analysis based on what is available.
 
 Search for coverage across ALL of these source categories:
 - Western outlets: Reuters, BBC, CNN, Fox News, NYT, Washington Post, AP, Bloomberg, Sky News
@@ -118,7 +115,7 @@ You MUST include stories from non-Western sources in your analysis. If a story i
 
 Important: 0% for any category is almost never accurate in a real conflict. Even if one side dominates, there is always counter-narrative coverage. If your initial analysis produces 0% for any category, search harder for regional and non-Western sources and re-analyze before returning results.
 
-For each story, classify its NARRATIVE — not the outlet, but what the story itself supports:
+For each story, classify its NARRATIVE - not the outlet, but what the story itself supports:
 
 - LEFT (${config.biasLeftLabel} side): Stories that frame ${config.biasLeftLabel} actions as justified, defensive, or necessary. Stories critical of ${config.biasRightLabel}'s actions. Stories emphasizing aggression or threats from ${config.biasRightLabel}.
 
@@ -130,7 +127,7 @@ Count how many stories fall into each category. Calculate the percentage for eac
 
 Return ONLY this JSON:
 
-{"total_stories":number,"left_count":number,"center_count":number,"right_count":number,"left_pct":number,"center_pct":number,"right_pct":number,"summary":"2-3 sentences explaining the current narrative landscape — what is dominating the conversation and which direction coverage is leaning","top_left_story":"headline of strongest ${config.biasLeftLabel}-sympathetic story","top_center_story":"headline of most neutral story","top_right_story":"headline of strongest ${config.biasRightLabel}-sympathetic story","last_updated":"ISO 8601 UTC timestamp"}`;
+{"total_stories":number,"left_count":number,"center_count":number,"right_count":number,"left_pct":number,"center_pct":number,"right_pct":number,"summary":"2-3 sentences explaining the current narrative landscape - what is dominating the conversation and which direction coverage is leaning","top_left_story":"headline of strongest ${config.biasLeftLabel}-sympathetic story","top_center_story":"headline of most neutral story","top_right_story":"headline of strongest ${config.biasRightLabel}-sympathetic story","last_updated":"ISO 8601 UTC timestamp"}`;
 
   logCost({ panel: PANEL, provider: "perplexity", model: "sonar-pro", costUsd: PRICES.perplexity_sonar_pro });
   const aiRes = await fetch("https://api.perplexity.ai/chat/completions", {
@@ -213,8 +210,6 @@ Deno.serve(async (req) => {
   }
 
   try {
-    // One-time cleanup: purge legacy cache row that used the un-suffixed key.
-    // Safe to run on every request — it's a no-op once the row is gone.
     try {
       const sb = getSupabaseAdmin();
       await sb.from("api_cache").delete().eq("function_name", "bias-tracker");
@@ -252,7 +247,6 @@ Deno.serve(async (req) => {
     }
 
     if (config.key === "all") {
-      // Fan out to all three conflicts in parallel
       const keys = ["iran-us", "ukraine-russia", "china-taiwan"] as const;
       const results = await Promise.all(
         keys.map((k) => analyzeOne(perplexityKey, CONFLICT_CONFIG[k])),
@@ -287,7 +281,6 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Single-conflict mode
     const single = await analyzeOne(perplexityKey, config);
     if (!single) {
       return errorResponse(cors, 502, "Upstream analysis failed");

@@ -3,14 +3,6 @@ import { supabase } from "@/integrations/supabase/client";
 import { useLanguage } from "@/i18n/LanguageContext";
 import { useConflictFilter } from "@/contexts/ConflictFilterContext";
 
-/**
- * Returns true if `translated` looks usable compared to `original`.
- * Rule: showing English is always better than showing nothing.
- *
- * - null/undefined translated → unusable
- * - if any array field on the original has items but the same field on
- *   the translated result is empty/missing → unusable
- */
 function isTranslationUsable(original: unknown, translated: unknown): boolean {
   if (translated === null || translated === undefined) return false;
 
@@ -48,20 +40,10 @@ function isTranslationUsable(original: unknown, translated: unknown): boolean {
 
   return true;
 }
-
-
-
-
-/**
- * Static Arabic translations for known bias labels and conflict titles.
- * Avoids wasteful API calls for these fixed strings.
- */
 const LABEL_TRANSLATIONS_AR: Record<string, string> = {
-  // Conflict titles
   "Iran / U.S.": "إيران / الولايات المتحدة",
   "Ukraine / Russia": "أوكرانيا / روسيا",
   "China / Taiwan": "الصين / تايوان",
-  // Bias labels
   "U.S. / Israel": "الولايات المتحدة / إسرائيل",
   "Iran": "إيران",
   "Neutral / International": "محايد / دولي",
@@ -73,13 +55,6 @@ const LABEL_TRANSLATIONS_AR: Record<string, string> = {
   "Anti-Western / Adversary-aligned": "معادي للغرب / حلفاء الخصوم",
 };
 
-/**
- * Special-case translator for the BiasTracker payload.
- *
- * - Labels and conflict titles use hardcoded Arabic translations (no API call).
- * - Summaries and story headlines are translated via API, batched per conflict.
- * - On any failure for a field, keep the original English.
- */
 async function translateBiasTracker<T>(original: T, targetLang: string): Promise<T> {
   if (!original || typeof original !== "object") return original;
   const data = original as any;
@@ -91,7 +66,6 @@ async function translateBiasTracker<T>(original: T, targetLang: string): Promise
     if (!block || typeof block !== "object") return block;
     const out = { ...block };
 
-    // Hardcode label translations
     for (const field of LABEL_FIELDS) {
       const val = block[field];
       if (typeof val === "string" && LABEL_TRANSLATIONS_AR[val]) {
@@ -99,7 +73,6 @@ async function translateBiasTracker<T>(original: T, targetLang: string): Promise
       }
     }
 
-    // Batch-translate text fields: collect all values, send as one object
     const toTranslate: Record<string, string> = {};
     for (const field of API_FIELDS) {
       const val = block[field];
@@ -150,8 +123,6 @@ export function useTranslatedData<T>(
 ) {
   const { language } = useLanguage();
   const { conflict } = useConflictFilter();
-  // Cache key includes BOTH conflict and language so each combination
-  // (e.g. "bias-tracker:iran-us:ar", "bias-tracker:all:ar") gets its own entry.
   const scopedKey = `${queryKey}:${conflict}:${language}`;
 
   const { data: translatedData, isLoading: isTranslating } = useQuery({
@@ -159,8 +130,6 @@ export function useTranslatedData<T>(
     queryFn: async () => {
       if (language === "en" || !originalData) return originalData;
       try {
-        // Special path: BiasTracker — translate per-conflict summary fields individually,
-        // skip labels, fall back to English on failure.
         if (queryKey === "bias-tracker") {
           try {
             const result = await translateBiasTracker(originalData, language);
@@ -194,7 +163,6 @@ export function useTranslatedData<T>(
 
   if (language === "en") return { data: originalData, isTranslating: false };
 
-  // Final guard at consumption: if translated payload is missing or unusable, prefer original.
   const safeData = isTranslationUsable(originalData, translatedData)
     ? (translatedData as T | undefined)
     : originalData;

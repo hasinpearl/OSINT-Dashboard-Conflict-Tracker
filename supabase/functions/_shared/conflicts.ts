@@ -1,6 +1,3 @@
-// Shared conflict configuration for all Edge Functions.
-// The frontend passes a `conflict` value in the request body. Each function
-// uses getConflictConfig() to tailor prompts, sources, and cache keys.
 
 export type ConflictKey = "all" | "iran-us" | "ukraine-russia" | "china-taiwan";
 
@@ -70,10 +67,6 @@ export const CONFLICT_CONFIG: Record<Exclude<ConflictKey, "all">, ConflictConfig
   },
 };
 
-/**
- * Returns config for a specific conflict, or a merged "all" config that
- * combines search terms, news sources, and uses the earliest timeline date.
- */
 export function getConflictConfig(conflict: string | undefined | null): ConflictConfig {
   const key = (conflict || "all") as ConflictKey;
 
@@ -81,7 +74,6 @@ export function getConflictConfig(conflict: string | undefined | null): Conflict
     return CONFLICT_CONFIG[key];
   }
 
-  // Merged "all" config
   const all = Object.values(CONFLICT_CONFIG);
   return {
     key: "all",
@@ -98,10 +90,6 @@ export function getConflictConfig(conflict: string | undefined | null): Conflict
   };
 }
 
-/**
- * Safely parse the conflict param from a request body. Defaults to "all"
- * for GET requests, empty bodies, or invalid JSON.
- */
 export async function readConflictFromRequest(req: Request): Promise<ConflictKey> {
   if (req.method !== "POST" && req.method !== "PUT") return "all";
   try {
@@ -111,7 +99,6 @@ export async function readConflictFromRequest(req: Request): Promise<ConflictKey
       return c;
     }
   } catch {
-    // ignore — empty body or non-JSON
   }
   return "all";
 }

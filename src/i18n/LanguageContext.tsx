@@ -18,12 +18,10 @@ export const useLanguage = () => {
 };
 
 const translations: Record<string, Record<Language, string>> = {
-  // Header
   "header.title": { en: "Conflict Tracker", ar: "متتبع الصراعات" },
   "header.byline": { en: "by Hessa Alhammadi", ar: "من حصه الحمادي" },
   "header.refresh": { en: "REFRESH", ar: "تحديث" },
 
-  // Panel titles
   "news.title": { en: "Live News Feed", ar: "آخر الأخبار مباشر" },
   "news.subtitle": { en: "LIVE SUMMARY", ar: "ملخص مباشر" },
   "news.offline": { en: "FEED OFFLINE", ar: "التغذية غير متصلة" },
@@ -59,36 +57,29 @@ const translations: Record<string, Record<Language, string>> = {
   "analyst.offline": { en: "FEED OFFLINE", ar: "التغذية غير متصلة" },
   "analyst.source": { en: "source", ar: "المصدر" },
 
-  // Severity labels
   "severity.critical": { en: "critical", ar: "حرج" },
   "severity.high": { en: "high", ar: "عالي" },
   "severity.developing": { en: "developing", ar: "قيد التطور" },
   "severity.verified": { en: "verified", ar: "موثق" },
   "severity.info": { en: "info", ar: "معلومات" },
 
-  // Confidence
   "confidence.verified": { en: "verified", ar: "موثق" },
   "confidence.unverified": { en: "unverified", ar: "غير موثق" },
   "confidence.developing": { en: "developing", ar: "قيد التطور" },
 
-  // Footer
   "footer.copyright": { en: "All rights reserved.", ar: "جميع الحقوق محفوظة." },
   "footer.disclaimer": {
     en: "Data is autonomously aggregated and may not reflect real-time conditions. Verify critical information independently.",
     ar: "يتم تجميع البيانات تلقائيًا وقد لا تعكس الظروف الآنية. تحقق من المعلومات الحرجة بشكل مستقل."
   },
 
-  // Expand
   "panel.expand": { en: "Expand", ar: "توسيع" },
   "panel.collapse": { en: "Collapse", ar: "تصغير" },
 
-  // Language
   "lang.switch": { en: "عربي", ar: "English" },
 
-  // Loading
   "loading.translating": { en: "Translating...", ar: "جاري الترجمة..." },
 
-  // Conflict filter
   "conflict.label": { en: "CONFLICT", ar: "الصراع" },
   "conflict.all": { en: "All", ar: "الكل" },
   "conflict.iran-us": { en: "Iran / U.S.", ar: "إيران / الولايات المتحدة" },

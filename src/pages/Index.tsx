@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from "react";
+import { Github } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { DashboardHeader } from "@/components/dashboard/DashboardHeader";
@@ -33,7 +34,6 @@ const Index = () => {
     setTimeout(() => setIsLoading(false), 3000);
   }, [queryClient]);
 
-  // One-time force_refresh on mount to repopulate all panels with fresh data
   useEffect(() => {
     if (hasForcedRef.current) return;
     hasForcedRef.current = true;
@@ -48,7 +48,6 @@ const Index = () => {
     });
   }, []);
 
-  // Hourly audit — fire-and-forget
   useEffect(() => {
     const runAudit = () => {
       supabase.functions
@@ -77,27 +76,27 @@ const Index = () => {
           </div>
           <div className="flex-1 min-h-0 overflow-auto grid grid-cols-1 lg:grid-cols-3 auto-rows-[minmax(280px,1fr)] gap-2">
             {/* Row 1 */}
-            <div className="lg:col-span-2">
+            <div>
               <NewsFeed />
+            </div>
+            <div className="lg:row-span-2 h-full">
+              <HotTopicsTimeline />
             </div>
             <div>
               <TelegramPanel />
             </div>
             {/* Row 2 */}
-            <div className="lg:col-span-2">
-              <LiveCoverage />
-            </div>
             <div>
               <BiasTracker />
             </div>
-            {/* Row 3 */}
             <div>
-              <HotTopicsTimeline />
-            </div>
-            <div className="lg:col-span-2">
               <OsintPanel />
             </div>
-            {/* Row 4 - full width */}
+            {/* Row 3 */}
+            <div className="lg:col-span-3">
+              <LiveCoverage />
+            </div>
+            {/* Row 4 */}
             <div className="lg:col-span-3">
               <AnalystPanel />
             </div>
@@ -113,9 +112,20 @@ const Index = () => {
             </span>
           )}
         </div>
-        <span className="text-muted-foreground font-bold max-w-xl text-end">
-          {t("footer.disclaimer")}
-        </span>
+        <div className="flex items-center gap-2 max-w-xl">
+          <span className="text-muted-foreground font-bold text-end">
+            {t("footer.disclaimer")}
+          </span>
+          <a
+            href="https://github.com/hasinpearl/OSINT-Dashboard-Conflict-Tracker"
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="GitHub repository"
+            className="text-muted-foreground hover:text-primary transition-colors shrink-0"
+          >
+            <Github className="w-4 h-4" />
+          </a>
+        </div>
       </footer>
     </div>
   );

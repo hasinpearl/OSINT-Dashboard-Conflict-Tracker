@@ -6,23 +6,18 @@ import { ExpandablePanel } from "./ExpandablePanel";
 interface Channel {
   id: string;
   name: string;
-  // Direct YouTube live video ID — more reliable than the live_stream channel pattern,
-  // which is blocked or stale for several broadcasters. Update periodically if a stream rotates.
   videoId: string;
   lang: "en" | "ar";
   color: string;
 }
 
-// All channel buttons share the brand teal when active to keep the dashboard identity cohesive.
 const BRAND_TEAL = "#00A7B5";
 const CHANNELS: Channel[] = [
-  // English
-  { id: "bloomberg", name: "BLOOMBERG", videoId: "iEpJwprxDdk", lang: "en", color: BRAND_TEAL },
-  { id: "skynews", name: "SKY NEWS", videoId: "6tk_lb7Jy6M", lang: "en", color: BRAND_TEAL },
+  { id: "bloomberg", name: "BLOOMBERG", videoId: "QB5BNdBFujE", lang: "en", color: BRAND_TEAL },
+  { id: "skynews", name: "SKY NEWS", videoId: "YDvsBbKfLPA", lang: "en", color: BRAND_TEAL },
   { id: "dw", name: "DW", videoId: "LuKwFajn37U", lang: "en", color: BRAND_TEAL },
-  // Arabic
-  { id: "skynews-arabia", name: "SKY NEWS ARABIA", videoId: "ymYr5ze2XeA", lang: "ar", color: BRAND_TEAL },
-  { id: "aljazeera", name: "AL JAZEERA", videoId: "N8xxOD0nT1Y", lang: "ar", color: BRAND_TEAL },
+  { id: "skynews-arabia", name: "SKY NEWS ARABIA", videoId: "ppgTP8xQQsM", lang: "ar", color: BRAND_TEAL },
+  { id: "aljazeera", name: "AL JAZEERA", videoId: "bNyUyrR0PHo", lang: "ar", color: BRAND_TEAL },
   { id: "alarabiya", name: "AL ARABIYA", videoId: "n7eQejkXbnM", lang: "ar", color: BRAND_TEAL },
 ];
 
@@ -42,14 +37,12 @@ export const LiveCoverage = () => {
       setActiveIds([id]);
       return;
     }
-    // Multi mode: toggle, but cap at layout size
     setActiveIds((prev) => {
       if (prev.includes(id)) {
         const next = prev.filter((x) => x !== id);
         return next.length === 0 ? [id] : next;
       }
       if (prev.length >= layout) {
-        // Replace oldest
         return [...prev.slice(1), id];
       }
       return [...prev, id];
@@ -61,7 +54,6 @@ export const LiveCoverage = () => {
     setActiveIds((prev) => {
       if (mode === 1) return prev.slice(0, 1);
       if (prev.length >= mode) return prev.slice(0, mode);
-      // Pad with default channels
       const fillers = CHANNELS.filter((c) => !prev.includes(c.id)).slice(0, mode - prev.length);
       return [...prev, ...fillers.map((c) => c.id)];
     });
@@ -101,8 +93,6 @@ const LiveCoverageInner = ({
   onLayoutChange,
   onMuteToggle,
 }: InnerProps) => {
-  // Detect if we're in expanded fullscreen mode by checking parent. ExpandablePanel uses fixed inset-0.
-  // We'll show the layout selector always but only allow >1 layouts visually when there's room.
   const englishChannels = CHANNELS.filter((c) => c.lang === "en");
   const arabicChannels = CHANNELS.filter((c) => c.lang === "ar");
 

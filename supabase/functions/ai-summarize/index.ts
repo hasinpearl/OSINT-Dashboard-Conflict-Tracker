@@ -70,7 +70,6 @@ Deno.serve(async (req) => {
         if (body && body.force_refresh === true) forceRefresh = true;
         if (body && typeof body.conflict === "string") bodyConflict = body.conflict;
       } catch {
-        // ignore non-JSON bodies
       }
     }
 
@@ -98,7 +97,6 @@ Deno.serve(async (req) => {
 
     const today = new Date().toISOString().split("T")[0];
 
-    // STEP 1: Scrape real timeline pages from journalist-maintained sources for this conflict.
     const sourcesToScrape = config.newsSources.slice(0, 4);
     const scrapeResults = await Promise.all(
       sourcesToScrape.map(async (sourceUrl) => {
@@ -125,7 +123,6 @@ Deno.serve(async (req) => {
       });
     }
 
-    // STEP 2: Single Perplexity call to extract structured timeline from scraped content.
     logCost({
       panel: PANEL,
       provider: "perplexity",
@@ -139,7 +136,7 @@ STRICT RULES:
 - ONLY use events explicitly mentioned in the scraped content below. Do NOT add events from your own knowledge.
 - Each event MUST have a date that appears in the scraped text. If no date is visible, skip it.
 - Each event MUST be relevant to the ${config.label} conflict. Skip unrelated stories.
-- NO duplicates — if two sources mention the same event, merge them into one entry.
+- NO duplicates - if two sources mention the same event, merge them into one entry.
 - Order from OLDEST to NEWEST.
 - Maximum 15 entries.
 - severity: critical (war-changing), high (major military/diplomatic), developing (significant but evolving)
@@ -189,7 +186,6 @@ ${scrapedContent}`;
       }
     }
 
-    // STEP 3: Server-side validation — date range, sort, dedupe.
     const warStart = new Date(WAR_START_DATE).getTime();
     const todayMs = new Date(today + "T23:59:59Z").getTime();
 
@@ -204,10 +200,8 @@ ${scrapedContent}`;
       return true;
     });
 
-    // Sort oldest -> newest
     inRange.sort((a: any, b: any) => (a.timestamp || "").localeCompare(b.timestamp || ""));
 
-    // Dedupe by title similarity (4+ shared words → drop later one)
     const deduped: any[] = [];
     for (const t of inRange) {
       const dup = deduped.some((kept) => isDuplicate(kept.title || "", t.title || ""));

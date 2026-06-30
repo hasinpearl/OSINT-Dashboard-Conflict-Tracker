@@ -1,12 +1,10 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
-// Per-call price estimates in USD. Update as pricing evolves.
-// These are rough averages; actual cost depends on token usage.
 export const PRICES = {
   firecrawl_scrape: 0.0015,        // ~$1.50 per 1k Firecrawl scrapes (Standard plan)
   perplexity_sonar: 0.005,         // ~$5/1M tokens, ~1k tokens/call avg
   perplexity_sonar_pro: 0.015,     // ~$15/1M tokens, ~1k tokens/call avg
-  google_ai_gemini_flash: 0.0008, // gemini-2.5-flash, ~1.5k tokens/call avg
+  google_ai_gemini_flash: 0.0008,
 } as const;
 
 export type Provider = "firecrawl" | "perplexity" | "google_ai";
@@ -28,9 +26,7 @@ function admin() {
   );
 }
 
-/** Fire-and-forget: log a single API call with its estimated cost. */
 export function logCost(params: LogParams): void {
-  // Don't await — never block the response on telemetry.
   admin()
     .from("api_cost_log")
     .insert({
@@ -47,7 +43,6 @@ export function logCost(params: LogParams): void {
     });
 }
 
-/** Convenience: log a cache hit (zero cost). */
 export function logCacheHit(panel: string, provider: Provider) {
   logCost({ panel, provider, costUsd: 0, cacheHit: true });
 }

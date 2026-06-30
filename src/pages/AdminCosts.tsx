@@ -88,7 +88,6 @@ const AdminCosts = () => {
       ? ((totalCacheHits / (totalCalls + totalCacheHits)) * 100).toFixed(1)
       : "0";
 
-  // Group by panel for the breakdown
   const byPanel = summary.reduce<Record<string, SummaryRow[]>>((acc, r) => {
     (acc[r.panel] ||= []).push(r);
     return acc;
@@ -203,7 +202,7 @@ const AdminCosts = () => {
                     </td>
                     <td className="p-2">{r.panel}</td>
                     <td className="p-2">{r.provider}</td>
-                    <td className="p-2 text-muted-foreground">{r.model || "—"}</td>
+                    <td className="p-2 text-muted-foreground">{r.model || "-"}</td>
                     <td className="p-2 text-right font-mono">${Number(r.cost_usd).toFixed(4)}</td>
                     <td className="p-2 text-center">{r.cache_hit ? "✓" : ""}</td>
                   </tr>

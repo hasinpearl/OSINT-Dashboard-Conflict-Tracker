@@ -17,7 +17,6 @@ Deno.serve(async (req) => {
     const config = getConflictConfig(conflict);
     const CACHE_KEY = `${CACHE_KEY_BASE}:${config.key}`;
 
-    // Check cache first
     const cached = await getCached(CACHE_KEY);
     if (cached) {
       logCacheHit(PANEL, "firecrawl");
@@ -111,7 +110,6 @@ Deno.serve(async (req) => {
       parsed = m ? JSON.parse(m[1]) : {};
     }
 
-    // Save to cache
     await setCache(CACHE_KEY, parsed);
 
     return new Response(JSON.stringify(parsed), {

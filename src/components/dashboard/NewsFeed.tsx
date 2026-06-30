@@ -9,10 +9,8 @@ import { ExpandablePanel } from "./ExpandablePanel";
 import { formatLocalDateTime } from "@/utils/formatTime";
 import { useConflictFilter } from "@/contexts/ConflictFilterContext";
 
-/** Map possibly-translated severity values back to valid CSS class names */
 const SEVERITY_MAP: Record<string, string> = {
   critical: "critical", high: "high", developing: "developing", verified: "verified", info: "info",
-  // Arabic translations
   "حرج": "critical", "عالي": "high", "قيد التطور": "developing", "موثق": "verified", "تم التحقق": "verified", "معلومات": "info",
 };
 const normSeverity = (s: string) => SEVERITY_MAP[s?.toLowerCase?.()] ?? SEVERITY_MAP[s] ?? "info";

@@ -136,17 +136,14 @@ Deno.serve(async (req) => {
     const config = getConflictConfig(conflict);
     const CACHE_KEY = `${CACHE_KEY_BASE}:${config.key}`;
 
-    // Per-conflict prompt filter — keep all channels but instruct the LLM to filter by topic
     const conflictFilter =
       config.key === "all"
         ? ""
         : ` Only include posts relevant to the ${config.label} conflict (key topics: ${config.searchTerms}). Exclude posts about other conflicts or unrelated topics.`;
 
-    // Check cache first (unless force_refresh)
     if (!forceRefresh) {
       const cached = await getCached(CACHE_KEY);
       if (cached) {
-        // Hard staleness check: inspect newest post timestamp
         const messages = (cached as any)?.messages ?? [];
         const newestTs = messages
           .map((m: any) => m?.timestamp)
@@ -160,7 +157,7 @@ Deno.serve(async (req) => {
           console.log(`Telegram cache newest post age: ${ageHours}h (key: ${CACHE_KEY})`);
 
           if (isNaN(newestAgeMs) || newestAgeMs > MAX_NEWEST_POST_AGE_MS) {
-            console.log(`Cache STALE (newest post >2h old) — clearing all telegram-feed cache rows`);
+            console.log(`Cache STALE (newest post >2h old) - clearing all telegram-feed cache rows`);
             await clearAllTelegramCache();
           } else {
             logCacheHit(PANEL, "firecrawl");
@@ -169,7 +166,7 @@ Deno.serve(async (req) => {
             });
           }
         } else {
-          console.log(`Telegram cache has no post timestamps — treating as stale`);
+          console.log(`Telegram cache has no post timestamps - treating as stale`);
           await clearAllTelegramCache();
         }
       }
@@ -186,7 +183,6 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Scrape in batches of 4 to avoid overwhelming Firecrawl (11 channels → 4-4-3)
     const batch1 = await Promise.all(CHANNELS.slice(0, 4).map(c => scrapeChannel(firecrawlKey, c)));
     const batch2 = await Promise.all(CHANNELS.slice(4, 8).map(c => scrapeChannel(firecrawlKey, c)));
     const batch3 = await Promise.all(CHANNELS.slice(8).map(c => scrapeChannel(firecrawlKey, c)));

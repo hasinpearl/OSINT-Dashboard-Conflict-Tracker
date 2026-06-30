@@ -110,9 +110,6 @@ const ConflictBar = ({
   </div>
 );
 
-// Track which conflicts have already been force-refreshed this session,
-// so we bypass any stale cache from the old (un-suffixed) bias-tracker key
-// exactly once per conflict.
 const refreshedConflicts = new Set<string>();
 
 export const BiasTracker = () => {

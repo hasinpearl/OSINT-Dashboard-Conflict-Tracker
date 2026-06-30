@@ -22,7 +22,6 @@ const CONFIDENCE_STYLES: Record<string, string> = {
   verified: "severity-verified",
   unverified: "severity-high",
   developing: "severity-developing",
-  // Arabic translations
   "موثق": "severity-verified",
   "تم التحقق": "severity-verified",
   "غير موثق": "severity-high",
@@ -94,7 +93,6 @@ export const OsintPanel = () => {
                 </div>
               );
             }
-            // Filter out placeholder/error items from Perplexity
             const items = rawItems.filter((item: OsintItem) =>
               !/(no .*(reports?|results?|data) available|unable to retrieve|couldn'?t find)/i.test(item.title ?? "")
             );

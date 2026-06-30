@@ -19,7 +19,6 @@ export async function getCached(functionName: string): Promise<any | null> {
 
   if (error || !data) return null;
 
-  // Cache entries written before cached_at existed must be treated as expired.
   const payloadCachedAt = data.response_data?.cached_at;
   if (!payloadCachedAt) {
     console.log(`Cache missing cached_at for ${functionName}, treating as expired`);
@@ -36,7 +35,6 @@ export async function getCached(functionName: string): Promise<any | null> {
   const age = Date.now() - referenceTime;
   if (age < CACHE_TTL_MS) {
     console.log(`Cache HIT for ${functionName} (age: ${Math.round(age / 1000)}s)`);
-    // Strip the cached_at marker before returning so consumers see clean data
     if (payloadCachedAt && typeof data.response_data === "object") {
       const { cached_at, ...rest } = data.response_data;
       return rest;
@@ -52,7 +50,6 @@ export async function setCache(functionName: string, responseData: any): Promise
   const sb = getSupabaseAdmin();
   const nowIso = new Date().toISOString();
 
-  // Embed cached_at into the payload so TTL travels with the data
   const payload =
     responseData && typeof responseData === "object" && !Array.isArray(responseData)
       ? { ...responseData, cached_at: nowIso }

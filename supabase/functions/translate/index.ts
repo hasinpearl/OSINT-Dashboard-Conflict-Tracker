@@ -6,7 +6,6 @@ const MAX_PAYLOAD_BYTES = 50_000; // 50 KB cap on translation input
 const CHUNK_SIZE = 6; // number of leaf string values per AI call
 const MODEL = "google/gemini-2.5-flash";
 
-// Keys whose values must NEVER be translated (used as CSS classes, code identifiers, etc.)
 const PROTECTED_KEYS = new Set([
   "severity", "confidence", "mode", "conflict", "key", "type", "status",
   "source", "coverage_spectrum",
@@ -30,9 +29,7 @@ function looksLikeIso(s: string): boolean {
 function isTranslatable(s: string): boolean {
   if (!s || s.length === 0) return false;
   if (looksLikeUrl(s) || looksLikeIso(s)) return false;
-  // skip pure numbers, hashes, codes
   if (/^[\d\s\-_./:#]+$/.test(s)) return false;
-  // require at least one ascii letter
   if (!/[A-Za-z]/.test(s)) return false;
   return true;
 }
@@ -76,7 +73,6 @@ function extractJson(content: string): any {
   if (m) {
     try { return JSON.parse(m[1]); } catch { /* fall */ }
   }
-  // Try to grab the first {...}
   const first = content.indexOf("{");
   const last = content.lastIndexOf("}");
   if (first !== -1 && last > first) {
@@ -149,7 +145,6 @@ async function translateChunkWithRetry(
     try {
       const result = await translateMap(apiKey, mapping);
       if (result) {
-        // Make sure every key is present, fall back to original for missing
         const merged: Record<string, string> = {};
         for (const k of Object.keys(mapping)) {
           merged[k] = typeof result[k] === "string" && result[k].trim().length > 0
@@ -163,7 +158,6 @@ async function translateChunkWithRetry(
       console.error("Chunk translation attempt failed:", e);
     }
   }
-  // Final fallback: return originals for this chunk only
   return { ...mapping };
 }
 
@@ -208,7 +202,6 @@ Deno.serve(async (req) => {
       return errorResponse(cors, 413, "Payload too large");
     }
 
-    // 1) Collect translatable leaves
     const leaves: Leaf[] = [];
     collectLeaves(data, [], leaves);
 
@@ -218,7 +211,6 @@ Deno.serve(async (req) => {
       });
     }
 
-    // 2) Build small chunks with stable ids -> original strings
     const result = deepClone(data);
     const idToLeaf = new Map<string, Leaf>();
     leaves.forEach((leaf, i) => idToLeaf.set(`v${i}`, leaf));
@@ -242,7 +234,6 @@ Deno.serve(async (req) => {
       throw e;
     }
 
-    // 3) Validation pass: any value identical to original gets a single retry as a tiny chunk
     const stale: string[] = [];
     for (const id of ids) {
       const orig = idToLeaf.get(id)!.value;
@@ -269,7 +260,6 @@ Deno.serve(async (req) => {
       }
     }
 
-    // 4) Merge translations back into the cloned structure
     for (const id of ids) {
       const leaf = idToLeaf.get(id)!;
       const v = translations[id] ?? leaf.value;

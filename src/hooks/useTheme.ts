@@ -1,10 +1,5 @@
 import { useEffect, useState } from "react";
 
-/**
- * Light/dark theme controller.
- * Persists to localStorage and toggles the `dark` class on <html>.
- * Initialized from saved value, falling back to OS preference.
- */
 export type Theme = "light" | "dark";
 const KEY = "hh-dashboard-theme";
 

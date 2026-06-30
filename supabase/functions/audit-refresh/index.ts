@@ -54,7 +54,7 @@ async function auditOne(
   const before = items.length;
 
   const userPrompt = `Review this list of news items and clean it:
-- Remove DUPLICATE items (same event described differently — keep the most detailed version)
+- Remove DUPLICATE items (same event described differently - keep the most detailed version)
 - Remove items OLDER than 48 hours based on their timestamp (current time: ${new Date().toISOString()})
 - Remove items SUPERSEDED by newer developments (e.g. ceasefire announced then collapsed → keep the collapse)
 - Keep the same JSON object shape for each item
@@ -106,7 +106,6 @@ ${JSON.stringify(items)}`;
   if (!Array.isArray(cleaned)) return null;
 
   const after = cleaned.length;
-  // Safety: don't accept absurd shrinkage to 0 unless original was already small
   if (after === 0 && before > 2) return null;
 
   return {
@@ -125,7 +124,6 @@ Deno.serve(async (req) => {
     const perplexityKey = Deno.env.get("PERPLEXITY_API_KEY");
     if (!perplexityKey) return errorResponse(cors, 500, "Service unavailable");
 
-    // Build the list of cache keys to consider
     const auditableBases = ["firecrawl-news", "perplexity-analyst", "perplexity-osint", "telegram-feed", "ai-summarize"];
     const candidateKeys = auditableBases.flatMap((b) => [b, ...CONFLICT_SUFFIXES.map((s) => `${b}:${s}`)]);
 
@@ -148,7 +146,6 @@ Deno.serve(async (req) => {
       itemsAfter += result.after;
       audited.push(row.function_name);
 
-      // Preserve cached_at from original payload so TTL is not reset
       const originalCachedAt = (row.response_data as any)?.cached_at;
       const newPayload =
         result.cleanedPayload && typeof result.cleanedPayload === "object" && !Array.isArray(result.cleanedPayload)
@@ -164,7 +161,6 @@ Deno.serve(async (req) => {
       if (writeErr) console.error(`Audit write failed for ${row.function_name}:`, writeErr);
     }
 
-    // ===== Cache cleanup =====
     const { data: allRows, error: allErr } = await sb
       .from("api_cache")
       .select("function_name, response_data");

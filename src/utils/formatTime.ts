@@ -1,4 +1,3 @@
-/** Format timestamps with the browser's detected local timezone. */
 
 const DATE_ONLY_RE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -7,7 +6,6 @@ function parseDate(input?: string | number | Date | null): Date | null {
   if (input instanceof Date) return isNaN(input.getTime()) ? null : input;
 
   if (typeof input === "string" && DATE_ONLY_RE.test(input)) {
-    // Treat YYYY-MM-DD as a calendar date in UTC so the displayed day doesn't shift by timezone.
     const d = new Date(`${input}T00:00:00Z`);
     return isNaN(d.getTime()) ? null : d;
   }
