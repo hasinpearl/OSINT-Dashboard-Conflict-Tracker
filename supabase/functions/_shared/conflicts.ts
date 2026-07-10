@@ -99,6 +99,7 @@ export async function readConflictFromRequest(req: Request): Promise<ConflictKey
       return c;
     }
   } catch {
+    // Body absent or not JSON; fall through to the default.
   }
   return "all";
 }

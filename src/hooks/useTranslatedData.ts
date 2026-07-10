@@ -55,14 +55,21 @@ const LABEL_TRANSLATIONS_AR: Record<string, string> = {
   "Anti-Western / Adversary-aligned": "معادي للغرب / حلفاء الخصوم",
 };
 
+type ConflictBlock = Record<string, unknown>;
+
+interface BiasTrackerData extends ConflictBlock {
+  mode?: string;
+  conflicts?: ConflictBlock[];
+}
+
 async function translateBiasTracker<T>(original: T, targetLang: string): Promise<T> {
   if (!original || typeof original !== "object") return original;
-  const data = original as any;
+  const data = original as BiasTrackerData;
 
   const LABEL_FIELDS = ["left_label", "center_label", "right_label", "label"] as const;
   const API_FIELDS = ["summary", "top_left_story", "top_center_story", "top_right_story"] as const;
 
-  const translateConflictBlock = async (block: any) => {
+  const translateConflictBlock = async (block: ConflictBlock) => {
     if (!block || typeof block !== "object") return block;
     const out = { ...block };
 
@@ -104,7 +111,7 @@ async function translateBiasTracker<T>(original: T, targetLang: string): Promise
 
   if (data.mode === "all" && Array.isArray(data.conflicts)) {
     const translatedConflicts = await Promise.all(
-      data.conflicts.map((c: any) => translateConflictBlock(c)),
+      data.conflicts.map((c) => translateConflictBlock(c)),
     );
     return { ...data, conflicts: translatedConflicts } as T;
   }

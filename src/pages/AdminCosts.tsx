@@ -29,7 +29,7 @@ const AdminCosts = () => {
   const [recent, setRecent] = useState<RecentRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [auditing, setAuditing] = useState(false);
-  const [auditResult, setAuditResult] = useState<any>(null);
+  const [auditResult, setAuditResult] = useState<unknown>(null);
 
   const runAudit = async () => {
     setAuditing(true);
@@ -38,8 +38,8 @@ const AdminCosts = () => {
       const { data, error } = await supabase.functions.invoke("audit-refresh");
       if (error) setAuditResult({ error: error.message });
       else setAuditResult(data);
-    } catch (e: any) {
-      setAuditResult({ error: e?.message ?? String(e) });
+    } catch (e) {
+      setAuditResult({ error: e instanceof Error ? e.message : String(e) });
     } finally {
       setAuditing(false);
     }
@@ -50,8 +50,8 @@ const AdminCosts = () => {
     const load = async () => {
       setLoading(true);
       const [{ data: sum }, { data: rec }] = await Promise.all([
-        (supabase as any).from("api_cost_summary_24h").select("*"),
-        (supabase as any)
+        supabase.from("api_cost_summary_24h").select("*"),
+        supabase
           .from("api_cost_log")
           .select("*")
           .order("created_at", { ascending: false })

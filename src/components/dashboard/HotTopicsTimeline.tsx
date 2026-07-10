@@ -43,7 +43,7 @@ export const HotTopicsTimeline = () => {
       const { data, error } = await supabase.functions.invoke("ai-summarize", {
         method: "POST",
         body: { conflict, ...(shouldForce ? { force_refresh: true } : {}) },
-      } as any);
+      });
 
       if (error) throw error;
       return data as { topics: HotTopic[] };

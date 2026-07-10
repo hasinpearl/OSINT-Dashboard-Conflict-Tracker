@@ -70,6 +70,7 @@ Deno.serve(async (req) => {
         if (body && body.force_refresh === true) forceRefresh = true;
         if (body && typeof body.conflict === "string") bodyConflict = body.conflict;
       } catch {
+        // Malformed JSON body; leave forceRefresh/bodyConflict as-is.
       }
     }
 
