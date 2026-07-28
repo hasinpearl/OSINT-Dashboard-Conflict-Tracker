@@ -1,6 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { corsHeadersFor, errorResponse } from "../_shared/cors.ts";
-import { logCost, PRICES } from "../_shared/costs.ts";
 
 const KNOWN_FUNCTIONS = [
   "firecrawl-news",
@@ -28,6 +27,25 @@ function admin() {
   );
 }
 
+async function requireAdmin(req: Request): Promise<boolean> {
+  const token = req.headers.get("Authorization")?.replace(/^Bearer\s+/i, "");
+  if (!token) return false;
+  const sb = createClient(
+    Deno.env.get("SUPABASE_URL")!,
+    Deno.env.get("SUPABASE_ANON_KEY")!,
+    { global: { headers: { Authorization: `Bearer ${token}` } } },
+  );
+  const { data: userData } = await sb.auth.getUser(token);
+  if (!userData.user) return false;
+  const { data: role } = await sb
+    .from("user_roles")
+    .select("role")
+    .eq("user_id", userData.user.id)
+    .eq("role", "admin")
+    .maybeSingle();
+  return !!role;
+}
+
 function extractItems(payload: any): { items: any[]; container: "items" | "data" | "array" | "none" } {
   if (!payload) return { items: [], container: "none" };
   if (Array.isArray(payload)) return { items: payload, container: "array" };
@@ -43,76 +61,21 @@ function rebuildPayload(original: any, cleanedItems: any[], container: string): 
   return original;
 }
 
-async function auditOne(
-  perplexityKey: string,
-  functionName: string,
-  payload: any,
-): Promise<{ before: number; after: number; cleanedPayload: any } | null> {
+function cleanItems(payload: any): { before: number; after: number; cleanedPayload: any } | null {
   const { items, container } = extractItems(payload);
   if (container === "none" || items.length === 0) return null;
-
-  const before = items.length;
-
-  const userPrompt = `Review this list of news items and clean it:
-- Remove DUPLICATE items (same event described differently - keep the most detailed version)
-- Remove items OLDER than 48 hours based on their timestamp (current time: ${new Date().toISOString()})
-- Remove items SUPERSEDED by newer developments (e.g. ceasefire announced then collapsed → keep the collapse)
-- Keep the same JSON object shape for each item
-- Return ONLY a valid JSON array of the cleaned items, no markdown, no commentary
-
-Items:
-${JSON.stringify(items)}`;
-
-  logCost({ panel: "audit", provider: "perplexity", model: "sonar", costUsd: PRICES.perplexity_sonar });
-
-  const res = await fetch("https://api.perplexity.ai/chat/completions", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${perplexityKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model: "sonar",
-      messages: [
-        { role: "system", content: "You are a data quality auditor. Return ONLY valid JSON arrays, no markdown." },
-        { role: "user", content: userPrompt },
-      ],
-    }),
+  const cutoff = Date.now() - 48 * 60 * 60 * 1000;
+  const seen = new Set<string>();
+  const cleaned = items.filter((item) => {
+    const timestamp = Date.parse(String(item?.timestamp ?? item?.published_at ?? ""));
+    if (Number.isFinite(timestamp) && timestamp < cutoff) return false;
+    const identity = String(item?.url ?? item?.headline ?? item?.title ?? item?.text ?? "")
+      .trim().toLowerCase().replace(/\s+/g, " ");
+    if (identity && seen.has(identity)) return false;
+    if (identity) seen.add(identity);
+    return true;
   });
-
-  if (!res.ok) {
-    console.error(`Audit Perplexity error for ${functionName}:`, await res.text());
-    return null;
-  }
-
-  const data = await res.json();
-  const content = data.choices?.[0]?.message?.content || "[]";
-
-  let cleaned: any[] = [];
-  try {
-    cleaned = JSON.parse(content);
-  } catch {
-    const match = content.match(/```(?:json)?\s*([\s\S]*?)```/);
-    if (match) {
-      try { cleaned = JSON.parse(match[1]); } catch { cleaned = []; }
-    } else {
-      const arrMatch = content.match(/\[[\s\S]*\]/);
-      if (arrMatch) {
-        try { cleaned = JSON.parse(arrMatch[0]); } catch { cleaned = []; }
-      }
-    }
-  }
-
-  if (!Array.isArray(cleaned)) return null;
-
-  const after = cleaned.length;
-  if (after === 0 && before > 2) return null;
-
-  return {
-    before,
-    after,
-    cleanedPayload: rebuildPayload(payload, cleaned, container),
-  };
+  return { before: items.length, after: cleaned.length, cleanedPayload: rebuildPayload(payload, cleaned, container) };
 }
 
 Deno.serve(async (req) => {
@@ -120,10 +83,8 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
 
   try {
+    if (!(await requireAdmin(req))) return errorResponse(cors, 401, "Admin authentication required");
     const sb = admin();
-    const perplexityKey = Deno.env.get("PERPLEXITY_API_KEY");
-    if (!perplexityKey) return errorResponse(cors, 500, "Service unavailable");
-
     const auditableBases = ["firecrawl-news", "perplexity-analyst", "perplexity-osint", "telegram-feed", "ai-summarize"];
     const candidateKeys = auditableBases.flatMap((b) => [b, ...CONFLICT_SUFFIXES.map((s) => `${b}:${s}`)]);
 
@@ -139,7 +100,7 @@ Deno.serve(async (req) => {
     let itemsAfter = 0;
 
     for (const row of rows ?? []) {
-      const result = await auditOne(perplexityKey, row.function_name, row.response_data);
+      const result = cleanItems(row.response_data);
       if (!result) continue;
 
       itemsBefore += result.before;

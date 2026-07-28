@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useCallback } from "react";
 import { Github } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
@@ -12,6 +12,7 @@ import { OsintPanel } from "@/components/dashboard/OsintPanel";
 import { AnalystPanel } from "@/components/dashboard/AnalystPanel";
 import { ConflictFilter } from "@/components/dashboard/ConflictFilter";
 import { useLanguage } from "@/i18n/LanguageContext";
+import { useConflictFilter } from "@/contexts/ConflictFilterContext";
 
 const PANEL_FUNCTIONS = [
   "firecrawl-news",
@@ -26,41 +27,27 @@ const Index = () => {
   const [isLoading, setIsLoading] = useState(false);
   const queryClient = useQueryClient();
   const { isRTL, t } = useLanguage();
-  const hasForcedRef = useRef(false);
+  const { conflict } = useConflictFilter();
 
-  const handleRefresh = useCallback(() => {
+  const handleRefresh = useCallback(async () => {
     setIsLoading(true);
-    queryClient.refetchQueries({ stale: true });
-    setTimeout(() => setIsLoading(false), 3000);
-  }, [queryClient]);
-
-  useEffect(() => {
-    if (hasForcedRef.current) return;
-    hasForcedRef.current = true;
-    PANEL_FUNCTIONS.forEach((fn) => {
-      supabase.functions
-        .invoke(fn, { body: { force_refresh: true } })
-        .then(({ error }) => {
-          if (error) console.warn(`[force_refresh] ${fn} error:`, error);
-          else console.log(`[force_refresh] ${fn} done`);
-        })
-        .catch((e) => console.warn(`[force_refresh] ${fn} exception:`, e));
-    });
-  }, []);
-
-  useEffect(() => {
-    const runAudit = () => {
-      supabase.functions
-        .invoke("audit-refresh")
-        .then(({ data, error }) => {
-          if (error) console.warn("[audit-refresh] error:", error);
-          else console.log("[audit-refresh] result:", data);
-        })
-        .catch((e) => console.warn("[audit-refresh] exception:", e));
-    };
-    const interval = setInterval(runAudit, 60 * 60 * 1000);
-    return () => clearInterval(interval);
-  }, []);
+    try {
+      await Promise.all(
+        PANEL_FUNCTIONS.map(async (fn) => {
+          const { error } = await supabase.functions.invoke(fn, {
+            body: { conflict, force_refresh: true },
+          });
+          if (error) throw error;
+        }),
+      );
+      await queryClient.refetchQueries({ type: "active" });
+    } catch (error) {
+      console.warn("[hard_refresh] one or more panels failed:", error);
+      await queryClient.refetchQueries({ type: "active" });
+    } finally {
+      setIsLoading(false);
+    }
+  }, [conflict, queryClient]);
 
   return (
     <div className="flex flex-col h-screen overflow-hidden" dir={isRTL ? "rtl" : "ltr"}>
