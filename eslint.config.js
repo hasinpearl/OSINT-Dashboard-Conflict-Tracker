@@ -24,13 +24,14 @@ export default tseslint.config(
     },
   },
   {
-    // Supabase Edge Functions run on Deno, not in the browser, and deal in
-    // untyped JSON from upstream APIs. The React rules above don't apply here.
-    files: ["supabase/functions/**/*.ts"],
+    // The API server runs on Node, not in the browser, and deals in untyped
+    // JSON from upstream APIs. The React rules above don't apply here.
+    files: ["server/**/*.ts"],
     languageOptions: {
-      globals: { Deno: "readonly" },
+      globals: globals.node,
     },
     rules: {
+      "react-refresh/only-export-components": "off",
       "@typescript-eslint/no-explicit-any": "off",
     },
   },

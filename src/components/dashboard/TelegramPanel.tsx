@@ -1,7 +1,8 @@
 import { useQuery } from "@tanstack/react-query";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
-import { supabase } from "@/integrations/supabase/client";
+import { invokeFn } from "@/lib/api";
+import { shouldForceRefresh } from "@/lib/freshness";
 import { MessageCircle } from "lucide-react";
 import { useState } from "react";
 import { useLanguage } from "@/i18n/LanguageContext";
@@ -38,13 +39,13 @@ export const TelegramPanel = () => {
 
   const { data, isLoading, error } = useQuery({
     queryKey: ["telegram-feed", conflict],
-    queryFn: async () => {
-      const { data, error } = await supabase.functions.invoke("telegram-feed", { body: { conflict } });
-      if (error) throw error;
-      return data as { messages: TelegramMessage[] };
-    },
+    queryFn: () =>
+      invokeFn<{ messages: TelegramMessage[] }>("telegram-feed", {
+        conflict,
+        ...(shouldForceRefresh(`telegram-feed:${conflict}`) ? { force_refresh: true } : {}),
+      }),
     staleTime: 2 * 60 * 1000,
-    refetchInterval: 60 * 60 * 1000,
+    refetchInterval: 15 * 60 * 1000,
   });
 
   const { data: translated } = useTranslatedData(data, "telegram-feed");

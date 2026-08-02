@@ -1,0 +1,42 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-osint}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-osint}
+      POSTGRES_DB: ${POSTGRES_DB:-osint}
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-osint} -d ${POSTGRES_DB:-osint}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  api:
+    build: ./server
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-osint}:${POSTGRES_PASSWORD:-osint}@db:5432/${POSTGRES_DB:-osint}
+      PORT: "8787"
+      PERPLEXITY_API_KEY: ${PERPLEXITY_API_KEY:-}
+      FIRECRAWL_API_KEY: ${FIRECRAWL_API_KEY:-}
+      AI_GATEWAY_URL: ${AI_GATEWAY_URL:-}
+      AI_GATEWAY_KEY: ${AI_GATEWAY_KEY:-}
+      ADMIN_TOKEN: ${ADMIN_TOKEN:-}
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  web:
+    build: .
+    # NOT port 80 — that collides with the host's reverse proxy.
+    ports:
+      - "${WEB_PORT:-8081}:80"
+    depends_on:
+      - api
+    restart: unless-stopped
+
+volumes:
+  db-data:

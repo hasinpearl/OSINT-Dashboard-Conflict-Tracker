@@ -1,7 +1,8 @@
 import { useQuery } from "@tanstack/react-query";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
-import { supabase } from "@/integrations/supabase/client";
+import { invokeFn } from "@/lib/api";
+import { shouldForceRefresh } from "@/lib/freshness";
 import { User, Quote, ExternalLink } from "lucide-react";
 import { useLanguage } from "@/i18n/LanguageContext";
 import { useTranslatedData } from "@/hooks/useTranslatedData";
@@ -24,13 +25,13 @@ export const AnalystPanel = () => {
 
   const { data, isLoading, error } = useQuery({
     queryKey: ["analyst", conflict],
-    queryFn: async () => {
-      const { data, error } = await supabase.functions.invoke("perplexity-analyst", { body: { conflict } });
-      if (error) throw error;
-      return data as { comments: AnalystComment[] };
-    },
+    queryFn: () =>
+      invokeFn<{ comments: AnalystComment[] }>("perplexity-analyst", {
+        conflict,
+        ...(shouldForceRefresh(`analyst:${conflict}`) ? { force_refresh: true } : {}),
+      }),
     staleTime: 10 * 60 * 1000,
-    refetchInterval: 60 * 60 * 1000,
+    refetchInterval: 15 * 60 * 1000,
   });
 
   const { data: translated } = useTranslatedData(data, "analyst");

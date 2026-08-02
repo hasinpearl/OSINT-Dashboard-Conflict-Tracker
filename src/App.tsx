@@ -5,6 +5,8 @@ import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { LanguageProvider } from "@/i18n/LanguageContext";
 import { ConflictFilterProvider } from "@/contexts/ConflictFilterContext";
+import { NotificationsProvider } from "@/contexts/NotificationsContext";
+import { NotificationsFeeder } from "@/components/notifications/NotificationsFeeder";
 import Index from "./pages/Index.tsx";
 import NotFound from "./pages/NotFound.tsx";
 
@@ -14,8 +16,10 @@ const App = () => (
   <QueryClientProvider client={queryClient}>
     <LanguageProvider>
       <ConflictFilterProvider>
+        <NotificationsProvider>
         <TooltipProvider>
           <Sonner />
+          <NotificationsFeeder />
           <BrowserRouter>
             <Suspense fallback={null}>
               <Routes>
@@ -26,6 +30,7 @@ const App = () => (
             </Suspense>
           </BrowserRouter>
         </TooltipProvider>
+        </NotificationsProvider>
       </ConflictFilterProvider>
     </LanguageProvider>
   </QueryClientProvider>

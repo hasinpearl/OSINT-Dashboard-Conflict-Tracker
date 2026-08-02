@@ -1,3 +1,4 @@
+import { toLatinDigits } from "@/lib/digits";
 
 const DATE_ONLY_RE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -14,21 +15,25 @@ function parseDate(input?: string | number | Date | null): Date | null {
   return isNaN(d.getTime()) ? null : d;
 }
 
+// Every formatter is post-processed through toLatinDigits: without an explicit
+// locale, Intl renders ٠-٩ for users with an Arabic browser locale.
 export function formatLocalDateTime(
   input?: string | number | Date | null,
   locale?: string
 ): string {
   const d = parseDate(input);
-  if (!d) return typeof input === "string" ? input : "";
+  if (!d) return typeof input === "string" ? toLatinDigits(input) : "";
   const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-  return new Intl.DateTimeFormat(locale, {
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-    timeZone,
-  }).format(d);
+  return toLatinDigits(
+    new Intl.DateTimeFormat(locale, {
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+      timeZone,
+    }).format(d)
+  );
 }
 
 export function formatLocalDate(
@@ -36,13 +41,14 @@ export function formatLocalDate(
   locale?: string
 ): string {
   const d = parseDate(input);
-  if (!d) return typeof input === "string" ? input : "";
+  if (!d) return typeof input === "string" ? toLatinDigits(input) : "";
   const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-  return new Intl.DateTimeFormat(locale, {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-    timeZone,
-  }).format(d);
+  return toLatinDigits(
+    new Intl.DateTimeFormat(locale, {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+      timeZone,
+    }).format(d)
+  );
 }
-

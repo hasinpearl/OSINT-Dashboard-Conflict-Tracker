@@ -1,1 +1,0 @@
-DELETE FROM public.api_cache WHERE function_name IN ('firecrawl-ground','bias-tracker');

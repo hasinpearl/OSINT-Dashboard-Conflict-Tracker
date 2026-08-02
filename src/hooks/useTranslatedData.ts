@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { supabase } from "@/integrations/supabase/client";
+import { invokeFn } from "@/lib/api";
 import { useLanguage } from "@/i18n/LanguageContext";
 import { useConflictFilter } from "@/contexts/ConflictFilterContext";
 
@@ -90,11 +90,12 @@ async function translateBiasTracker<T>(original: T, targetLang: string): Promise
 
     if (Object.keys(toTranslate).length > 0) {
       try {
-        const { data: result, error } = await supabase.functions.invoke("translate", {
-          body: { data: toTranslate, targetLang },
+        const result = await invokeFn<{ translated?: Record<string, string> }>("translate", {
+          data: toTranslate,
+          targetLang,
         });
-        if (!error && result?.translated) {
-          const t = result.translated as Record<string, string>;
+        if (result?.translated) {
+          const t = result.translated;
           for (const field of API_FIELDS) {
             if (typeof t[field] === "string" && t[field].trim().length > 0) {
               out[field] = t[field];
@@ -147,14 +148,11 @@ export function useTranslatedData<T>(
           }
         }
 
-        const { data, error } = await supabase.functions.invoke("translate", {
-          body: { data: originalData, targetLang: language },
+        const data = await invokeFn<{ translated: T } | null>("translate", {
+          data: originalData,
+          targetLang: language,
         });
-        if (error) {
-          console.error("Translation error:", error);
-          return originalData;
-        }
-        const translated = (data as { translated: T } | null)?.translated;
+        const translated = data?.translated;
         if (!isTranslationUsable(originalData, translated)) {
           return originalData;
         }

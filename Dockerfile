@@ -3,8 +3,6 @@ WORKDIR /app
 COPY package.json ./
 RUN npm install
 COPY . .
-ARG VITE_SUPABASE_URL
-ARG VITE_SUPABASE_PUBLISHABLE_KEY
 RUN npm run build
 
 FROM nginx:alpine

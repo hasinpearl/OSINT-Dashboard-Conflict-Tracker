@@ -182,3 +182,17 @@
   color: hsl(var(--severity-verified)) !important;
   border: 1px solid hsl(var(--severity-verified) / 0.3) !important;
 }
+
+/* Breaking-news ticker. The animation MUST live here in the stylesheet with
+   only the duration as a CSS variable — an inline style={{ animation: ... }}
+   would win over the :hover rule and the pause would silently never work. */
+@keyframes ticker-scroll {
+  from { transform: translateX(0); }
+  to { transform: translateX(-50%); }
+}
+.ticker-track {
+  animation: ticker-scroll var(--ticker-duration, 40s) linear infinite;
+}
+.ticker-wrap:hover .ticker-track {
+  animation-play-state: paused;
+}

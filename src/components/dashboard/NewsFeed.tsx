@@ -1,43 +1,17 @@
-import { useQuery } from "@tanstack/react-query";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
-import { supabase } from "@/integrations/supabase/client";
 import { Newspaper, ExternalLink } from "lucide-react";
 import { useLanguage } from "@/i18n/LanguageContext";
 import { useTranslatedData } from "@/hooks/useTranslatedData";
+import { useNewsStories } from "@/hooks/usePanelData";
 import { ExpandablePanel } from "./ExpandablePanel";
 import { formatLocalDateTime } from "@/utils/formatTime";
-import { useConflictFilter } from "@/contexts/ConflictFilterContext";
-
-const SEVERITY_MAP: Record<string, string> = {
-  critical: "critical", high: "high", developing: "developing", verified: "verified", info: "info",
-  "حرج": "critical", "عالي": "high", "قيد التطور": "developing", "موثق": "verified", "تم التحقق": "verified", "معلومات": "info",
-};
-const normSeverity = (s: string) => SEVERITY_MAP[s?.toLowerCase?.()] ?? SEVERITY_MAP[s] ?? "info";
-
-interface NewsItem {
-  headline: string;
-  summary: string;
-  source: string;
-  severity: "critical" | "high" | "developing" | "verified" | "info";
-  timestamp: string;
-  url?: string;
-}
+import { normSeverity } from "@/utils/severity";
 
 export const NewsFeed = () => {
   const { t } = useLanguage();
-  const { conflict } = useConflictFilter();
 
-  const { data, isLoading, error } = useQuery({
-    queryKey: ["news-feed", conflict],
-    queryFn: async () => {
-      const { data, error } = await supabase.functions.invoke("firecrawl-news", { body: { conflict } });
-      if (error) throw error;
-      return data as { stories: NewsItem[] };
-    },
-    staleTime: 5 * 60 * 1000,
-    refetchInterval: 60 * 60 * 1000,
-  });
+  const { data, isLoading, error } = useNewsStories();
 
   const { data: translated } = useTranslatedData(data, "news-feed");
 

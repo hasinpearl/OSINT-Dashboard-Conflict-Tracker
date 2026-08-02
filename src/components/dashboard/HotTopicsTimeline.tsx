@@ -2,19 +2,15 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
-import { supabase } from "@/integrations/supabase/client";
+import { invokeFn } from "@/lib/api";
+import { shouldForceRefresh } from "@/lib/freshness";
 import { TrendingUp, RefreshCw } from "lucide-react";
 import { useLanguage } from "@/i18n/LanguageContext";
 import { useTranslatedData } from "@/hooks/useTranslatedData";
 import { ExpandablePanel } from "./ExpandablePanel";
 import { formatLocalDate } from "@/utils/formatTime";
 import { useConflictFilter } from "@/contexts/ConflictFilterContext";
-
-const SEVERITY_MAP: Record<string, string> = {
-  critical: "critical", high: "high", developing: "developing", verified: "verified", info: "info",
-  "حرج": "critical", "عالي": "high", "قيد التطور": "developing", "موثق": "verified", "تم التحقق": "verified", "معلومات": "info",
-};
-const normSeverity = (s: string) => SEVERITY_MAP[s?.toLowerCase?.()] ?? SEVERITY_MAP[s] ?? "info";
+import { normSeverity } from "@/utils/severity";
 
 interface HotTopic {
   title: string;
@@ -29,27 +25,23 @@ export const HotTopicsTimeline = () => {
   const { t } = useLanguage();
   const queryClient = useQueryClient();
   const { conflict } = useConflictFilter();
-  const initialLoadRef = useRef(true);
   const forceNextRef = useRef(false);
   const [isManualRefreshing, setIsManualRefreshing] = useState(false);
 
   const { data, isLoading, error, refetch, isFetching } = useQuery({
     queryKey: ["hot-topics", conflict],
     queryFn: async () => {
-      const shouldForce = initialLoadRef.current || forceNextRef.current;
-      initialLoadRef.current = false;
+      const shouldForce =
+        forceNextRef.current || shouldForceRefresh(`hot-topics:${conflict}`);
       forceNextRef.current = false;
 
-      const { data, error } = await supabase.functions.invoke("ai-summarize", {
-        method: "POST",
-        body: { conflict, ...(shouldForce ? { force_refresh: true } : {}) },
+      return invokeFn<{ topics: HotTopic[] }>("ai-summarize", {
+        conflict,
+        ...(shouldForce ? { force_refresh: true } : {}),
       });
-
-      if (error) throw error;
-      return data as { topics: HotTopic[] };
     },
     staleTime: 5 * 60 * 1000,
-    refetchInterval: 60 * 60 * 1000,
+    refetchInterval: 15 * 60 * 1000,
   });
 
   const { data: translated } = useTranslatedData(data, "hot-topics");

@@ -3,6 +3,7 @@ import { RefreshCw, Radio, Sun, Moon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useLanguage } from "@/i18n/LanguageContext";
 import { useTheme } from "@/hooks/useTheme";
+import { NotificationBell } from "@/components/notifications/NotificationBell";
 import { cn } from "@/lib/utils";
 import logoWhite from "@/assets/logo-hessa.png";
 import flagUAE from "@/assets/flag-uae.png";
@@ -110,6 +111,7 @@ export const DashboardHeader = ({ onRefresh, isLoading }: DashboardHeaderProps) 
               <RefreshCw className={`h-3.5 w-3.5 mr-1 ${isLoading ? "animate-spin" : ""}`} />
               <span className="text-xs font-mono">{t("header.refresh")}</span>
             </Button>
+            <NotificationBell />
             {themeToggle}
           </div>
         </div>
@@ -138,6 +140,7 @@ export const DashboardHeader = ({ onRefresh, isLoading }: DashboardHeaderProps) 
             >
               <RefreshCw className={`h-3 w-3 ${isLoading ? "animate-spin" : ""}`} />
             </Button>
+            <NotificationBell />
             {themeToggle}
           </div>
         </div>

@@ -1,8 +1,9 @@
 import { useState, useCallback } from "react";
 import { Github } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
-import { supabase } from "@/integrations/supabase/client";
+import { resetForced } from "@/lib/freshness";
 import { DashboardHeader } from "@/components/dashboard/DashboardHeader";
+import { BreakingNewsBar } from "@/components/dashboard/BreakingNewsBar";
 import { NewsFeed } from "@/components/dashboard/NewsFeed";
 import { TelegramPanel } from "@/components/dashboard/TelegramPanel";
 import { LiveCoverage } from "@/components/dashboard/LiveCoverage";
@@ -12,42 +13,26 @@ import { OsintPanel } from "@/components/dashboard/OsintPanel";
 import { AnalystPanel } from "@/components/dashboard/AnalystPanel";
 import { ConflictFilter } from "@/components/dashboard/ConflictFilter";
 import { useLanguage } from "@/i18n/LanguageContext";
-import { useConflictFilter } from "@/contexts/ConflictFilterContext";
-
-const PANEL_FUNCTIONS = [
-  "firecrawl-news",
-  "telegram-feed",
-  "ai-summarize",
-  "perplexity-osint",
-  "perplexity-analyst",
-  "bias-tracker",
-];
 
 const Index = () => {
   const [isLoading, setIsLoading] = useState(false);
   const queryClient = useQueryClient();
   const { isRTL, t } = useLanguage();
-  const { conflict } = useConflictFilter();
 
+  // Clearing the force tracker makes every panel's next queryFn send
+  // force_refresh itself — one call per panel, results land in the query
+  // cache (no fire-and-forget loop whose responses get thrown away).
   const handleRefresh = useCallback(async () => {
     setIsLoading(true);
     try {
-      await Promise.all(
-        PANEL_FUNCTIONS.map(async (fn) => {
-          const { error } = await supabase.functions.invoke(fn, {
-            body: { conflict, force_refresh: true },
-          });
-          if (error) throw error;
-        }),
-      );
+      resetForced();
       await queryClient.refetchQueries({ type: "active" });
     } catch (error) {
       console.warn("[hard_refresh] one or more panels failed:", error);
-      await queryClient.refetchQueries({ type: "active" });
     } finally {
       setIsLoading(false);
     }
-  }, [conflict, queryClient]);
+  }, [queryClient]);
 
   return (
     <div className="flex flex-col h-screen overflow-hidden" dir={isRTL ? "rtl" : "ltr"}>
@@ -58,6 +43,9 @@ const Index = () => {
           </div>
         </div>
         <main className="h-full overflow-hidden p-2 pt-[7rem] sm:pt-[7.5rem] flex flex-col">
+          <div className="shrink-0 mb-2">
+            <BreakingNewsBar />
+          </div>
           <div className="shrink-0 mb-2">
             <ConflictFilter />
           </div>

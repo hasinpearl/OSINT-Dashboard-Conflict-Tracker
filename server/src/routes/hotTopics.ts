@@ -1,0 +1,179 @@
+import type { Context } from "hono";
+import { FORCE_MIN_AGE_MS, getCached, setCache } from "../cache";
+import { logCost, logCacheHit, PRICES } from "../costs";
+import { getConflictConfig, readConflict } from "../conflicts";
+import { envKey } from "../env";
+import { extractJson, readForceRefresh, readJsonBody } from "../request";
+
+const CACHE_KEY_BASE = "ai-summarize";
+const PANEL = "hot-topics";
+
+async function firecrawlScrape(url: string, apiKey: string): Promise<string> {
+  try {
+    const res = await fetch("https://api.firecrawl.dev/v2/scrape", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        url,
+        formats: ["markdown"],
+        onlyMainContent: true,
+      }),
+    });
+    if (!res.ok) {
+      console.error(`Firecrawl scrape failed for ${url}: ${res.status}`);
+      return "";
+    }
+    const data: any = await res.json();
+    const md = data?.data?.markdown ?? data?.markdown ?? "";
+    return typeof md === "string" ? md.slice(0, 3000) : "";
+  } catch (e) {
+    console.error(`Firecrawl error for ${url}:`, e);
+    return "";
+  }
+}
+
+function titleWords(s: string): Set<string> {
+  return new Set(
+    (s || "")
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, " ")
+      .split(/\s+/)
+      .filter((w) => w.length > 3),
+  );
+}
+
+function isDuplicate(a: string, b: string): boolean {
+  const wa = titleWords(a);
+  const wb = titleWords(b);
+  let shared = 0;
+  for (const w of wa) if (wb.has(w)) shared++;
+  return shared >= 4;
+}
+
+export async function hotTopicsRoute(c: Context) {
+  const body = await readJsonBody(c);
+  const forceRefresh = readForceRefresh(c, body);
+  const config = getConflictConfig(readConflict(body));
+  const CACHE_KEY = `${CACHE_KEY_BASE}:${config.key}`;
+  const WAR_START_DATE = config.timelineStartDate;
+
+  const cached = await getCached(CACHE_KEY, forceRefresh ? FORCE_MIN_AGE_MS : undefined);
+  if (cached) {
+    logCacheHit(PANEL, "perplexity");
+    return c.json(cached);
+  }
+
+  const perplexityKey = envKey("PERPLEXITY_API_KEY");
+  const firecrawlKey = envKey("FIRECRAWL_API_KEY");
+  if (!perplexityKey || !firecrawlKey) {
+    return c.json({ error: "Service unavailable" }, 500);
+  }
+
+  const today = new Date().toISOString().split("T")[0];
+
+  const sourcesToScrape = config.newsSources.slice(0, 4);
+  const scrapeResults = await Promise.all(
+    sourcesToScrape.map(async (sourceUrl) => {
+      logCost({
+        panel: PANEL,
+        provider: "firecrawl",
+        model: "scrape",
+        costUsd: PRICES.firecrawl_scrape,
+      });
+      const md = await firecrawlScrape(sourceUrl, firecrawlKey);
+      return { url: sourceUrl, markdown: md };
+    }),
+  );
+
+  const scrapedContent = scrapeResults
+    .filter((r) => r.markdown)
+    .map((r) => `=== ${r.url} ===\n${r.markdown}`)
+    .join("\n\n");
+
+  if (!scrapedContent) {
+    console.error("All Firecrawl scrapes returned empty content");
+    return c.json({ topics: [] });
+  }
+
+  logCost({
+    panel: PANEL,
+    provider: "perplexity",
+    model: "sonar-pro",
+    costUsd: PRICES.perplexity_sonar_pro,
+  });
+
+  const userPrompt = `You are a timeline editor. From the following scraped news content, extract ONLY major developments in the ${config.label} conflict (key topics: ${config.searchTerms}) that occurred between ${WAR_START_DATE} and today (${today}).
+
+STRICT RULES:
+- ONLY use events explicitly mentioned in the scraped content below. Do NOT add events from your own knowledge.
+- Each event MUST have a date that appears in the scraped text. If no date is visible, skip it.
+- Each event MUST be relevant to the ${config.label} conflict. Skip unrelated stories.
+- NO duplicates - if two sources mention the same event, merge them into one entry.
+- Order from OLDEST to NEWEST.
+- Maximum 15 entries.
+- severity: critical (war-changing), high (major military/diplomatic), developing (significant but evolving)
+
+Return ONLY this JSON:
+{"topics":[{"title":"short title max 8 words","summary":"1-2 sentences with key facts","severity":"critical|high|developing","timestamp":"YYYY-MM-DD","source":"which outlet reported this"}]}
+
+SCRAPED CONTENT:
+${scrapedContent}`;
+
+  const aiRes = await fetch("https://api.perplexity.ai/chat/completions", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${perplexityKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: "sonar-pro",
+      messages: [
+        {
+          role: "system",
+          content: `You are a strict timeline editor for the ${config.label} conflict. You ONLY use facts from the provided scraped text. You NEVER add events from memory. Today is ${today}. Return ONLY valid JSON, no markdown.`,
+        },
+        { role: "user", content: userPrompt },
+      ],
+    }),
+  });
+
+  if (!aiRes.ok) {
+    console.error("Perplexity structure call failed:", aiRes.status, await aiRes.text().catch(() => ""));
+    return c.json({ topics: [] });
+  }
+
+  const aiData: any = await aiRes.json();
+  const content = aiData.choices?.[0]?.message?.content || "{}";
+  const parsed: { topics?: any[] } = extractJson(content) ?? { topics: [] };
+
+  const warStart = new Date(WAR_START_DATE).getTime();
+  const todayMs = new Date(today + "T23:59:59Z").getTime();
+
+  const inRange = (parsed.topics || []).filter((t: any) => {
+    if (!t || !t.timestamp) return false;
+    const ts = new Date(t.timestamp).getTime();
+    if (isNaN(ts)) return false;
+    if (ts < warStart || ts > todayMs) {
+      console.log(`Filtered out-of-range event: ${t.title} (${t.timestamp})`);
+      return false;
+    }
+    return true;
+  });
+
+  inRange.sort((a: any, b: any) => (a.timestamp || "").localeCompare(b.timestamp || ""));
+
+  const deduped: any[] = [];
+  for (const t of inRange) {
+    const dup = deduped.some((kept) => isDuplicate(kept.title || "", t.title || ""));
+    if (!dup) deduped.push(t);
+  }
+
+  const validated = { topics: deduped };
+
+  await setCache(CACHE_KEY, validated);
+
+  return c.json(validated);
+}

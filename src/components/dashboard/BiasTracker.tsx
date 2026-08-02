@@ -1,7 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
-import { supabase } from "@/integrations/supabase/client";
+import { invokeFn } from "@/lib/api";
+import { shouldForceRefresh } from "@/lib/freshness";
+import { toLatinDigits } from "@/lib/digits";
 import { BarChart3 } from "lucide-react";
 import { useLanguage } from "@/i18n/LanguageContext";
 import { useTranslatedData } from "@/hooks/useTranslatedData";
@@ -110,23 +112,17 @@ const ConflictBar = ({
   </div>
 );
 
-const refreshedConflicts = new Set<string>();
-
 export const BiasTracker = () => {
   const { t } = useLanguage();
   const { conflict } = useConflictFilter();
 
   const { data, isLoading, error } = useQuery({
     queryKey: ["bias-tracker", conflict],
-    queryFn: async () => {
-      const force_refresh = !refreshedConflicts.has(conflict);
-      const { data, error } = await supabase.functions.invoke("bias-tracker", {
-        body: { conflict, force_refresh },
-      });
-      if (error) throw error;
-      refreshedConflicts.add(conflict);
-      return data as BiasResponse;
-    },
+    queryFn: () =>
+      invokeFn<BiasResponse>("bias-tracker", {
+        conflict,
+        ...(shouldForceRefresh(`bias-tracker:${conflict}`) ? { force_refresh: true } : {}),
+      }),
     staleTime: 12 * 60 * 60 * 1000,
     refetchInterval: 12 * 60 * 60 * 1000,
   });
@@ -135,7 +131,7 @@ export const BiasTracker = () => {
   const view = (translated ?? data) as BiasResponse | undefined;
 
   const lastAnalyzed = view?.last_updated
-    ? new Date(view.last_updated).toLocaleString()
+    ? toLatinDigits(new Date(view.last_updated).toLocaleString("en-GB"))
     : null;
 
   return (

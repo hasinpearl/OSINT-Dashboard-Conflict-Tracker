@@ -36,7 +36,7 @@ const translations: Record<string, Record<Language, string>> = {
   "live.title": { en: "LIVE NEWS", ar: "البث المباشر" },
 
   "bias.title": { en: "Bias Tracker", ar: "متتبع التحيز" },
-  "bias.subtitle": { en: "Content narrative analysis · Updated every 12h", ar: "تحليل سردية المحتوى · يُحدَّث كل ١٢ ساعة" },
+  "bias.subtitle": { en: "Content narrative analysis · Updated every 12h", ar: "تحليل سردية المحتوى · يُحدَّث كل 12 ساعة" },
   "bias.offline": { en: "FEED OFFLINE", ar: "التغذية غير متصلة" },
   "bias.left": { en: "LEFT", ar: "يسار" },
   "bias.center": { en: "CENTER", ar: "وسط" },
@@ -72,6 +72,14 @@ const translations: Record<string, Record<Language, string>> = {
     en: "Data is autonomously aggregated and may not reflect real-time conditions. Verify critical information independently.",
     ar: "يتم تجميع البيانات تلقائيًا وقد لا تعكس الظروف الآنية. تحقق من المعلومات الحرجة بشكل مستقل."
   },
+
+  "ticker.breaking": { en: "BREAKING", ar: "عاجل" },
+
+  "notifications.title": { en: "Notifications", ar: "الإشعارات" },
+  "notifications.empty": { en: "No notifications yet", ar: "لا توجد إشعارات بعد" },
+  "notifications.clear": { en: "Clear all", ar: "مسح الكل" },
+  "notifications.aria": { en: "Notifications", ar: "الإشعارات" },
+  "notifications.toastTitle": { en: "Breaking news", ar: "خبر عاجل" },
 
   "panel.expand": { en: "Expand", ar: "توسيع" },
   "panel.collapse": { en: "Collapse", ar: "تصغير" },
