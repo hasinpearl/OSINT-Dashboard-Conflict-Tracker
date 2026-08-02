@@ -1,0 +1,7 @@
+# Local-only overrides. `docker compose up` merges this file automatically;
+# Coolify runs with an explicit `-f docker-compose.yml` and never sees it.
+services:
+  web:
+    # NOT port 80 — that collides with the host's reverse proxy.
+    ports:
+      - "${WEB_PORT:-8081}:80"

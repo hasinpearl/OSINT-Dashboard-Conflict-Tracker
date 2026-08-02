@@ -31,9 +31,13 @@ services:
 
   web:
     build: .
-    # NOT port 80 — that collides with the host's reverse proxy.
-    ports:
-      - "${WEB_PORT:-8081}:80"
+    # No host port binding here: Coolify's reverse proxy reaches the container
+    # directly on port 80 over the Docker network (a fixed host bind caused
+    # "port is already allocated" on the deployment server). For plain
+    # `docker compose up` runs, docker-compose.override.yml publishes
+    # ${WEB_PORT:-8081}:80 — Coolify ignores it because it passes -f explicitly.
+    expose:
+      - "80"
     depends_on:
       - api
     restart: unless-stopped

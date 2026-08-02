@@ -67,6 +67,12 @@ docker compose up -d --build
 
 Three services: `db` (postgres:16 + volume), `api` (build of `server/`), `web` (frontend build behind nginx, which proxies `/api` to the api container).
 
+Port publishing lives in `docker-compose.override.yml` (local runs only). On
+**Coolify** the override file is not loaded and no host port is bound — point
+the application's domain at the `web` service (port 80) and Coolify's reverse
+proxy routes to the container directly, so it can never collide with ports
+already allocated on the host.
+
 ## License
 
 MIT - Hessa Alhammadi
