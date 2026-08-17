@@ -49,7 +49,7 @@ export const OsintPanel = () => {
   const { data, isLoading, error } = useQuery({
     queryKey: ["osint", conflict],
     queryFn: () =>
-      invokeFn<{ items: OsintItem[] }>("perplexity-osint", {
+      invokeFn<{ items: OsintItem[] }>("osint", {
         conflict,
         ...(shouldForceRefresh(`osint:${conflict}`) ? { force_refresh: true } : {}),
       }),

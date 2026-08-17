@@ -23,10 +23,9 @@ app.onError((err, c) => {
 app.get("/api/health", healthRoute);
 
 // Data routes. Same-origin behind nginx, so no CORS handling needed.
-// The frontend keeps invoking the old edge-function names via /api/<name>.
 app.post("/api/firecrawl-news", newsRoute);
-app.post("/api/perplexity-analyst", analystRoute);
-app.post("/api/perplexity-osint", osintRoute);
+app.post("/api/analyst", analystRoute);
+app.post("/api/osint", osintRoute);
 app.post("/api/telegram-feed", telegramRoute);
 app.post("/api/ai-summarize", hotTopicsRoute);
 app.post("/api/bias-tracker", biasTrackerRoute);
