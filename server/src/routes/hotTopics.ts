@@ -1,12 +1,35 @@
 import type { Context } from "hono";
-import { FORCE_MIN_AGE_MS, getCached, setCache } from "../cache";
+import { extractStructured } from "../agents";
 import { logCost, logCacheHit, PRICES } from "../costs";
 import { getConflictConfig, readConflict } from "../conflicts";
 import { envKey } from "../env";
-import { extractJson, readForceRefresh, readJsonBody } from "../request";
+import { readForceRefresh, readJsonBody } from "../request";
+import {
+  collectionAgeMs,
+  getTimeline,
+  markCollected,
+  storeItems,
+  toDateOnly,
+  upsertTimelineEvents,
+  type TimelineEvent,
+} from "../timeline";
 
-const CACHE_KEY_BASE = "ai-summarize";
 const PANEL = "hot-topics";
+
+//TUNE: Control how long a collection pass stays fresh before re-collecting
+const COLLECT_TTL_MS = 60 * 60 * 1000;
+//TUNE: Control the min age a force refresh will accept before re-collecting
+const FORCE_MIN_COLLECT_AGE_MS = 5 * 60 * 1000;
+//TUNE: Control how many timeline events are returned per response
+const MAX_EVENTS = Number(envKey("TIMELINE_MAX_EVENTS") || 40);
+
+interface RawTopic {
+  title?: string;
+  summary?: string;
+  severity?: string;
+  timestamp?: string;
+  source?: string;
+}
 
 async function firecrawlScrape(url: string, apiKey: string): Promise<string> {
   try {
@@ -35,40 +58,39 @@ async function firecrawlScrape(url: string, apiKey: string): Promise<string> {
   }
 }
 
-function titleWords(s: string): Set<string> {
-  return new Set(
-    (s || "")
-      .toLowerCase()
-      .replace(/[^a-z0-9\s]/g, " ")
-      .split(/\s+/)
-      .filter((w) => w.length > 3),
-  );
-}
-
-function isDuplicate(a: string, b: string): boolean {
-  const wa = titleWords(a);
-  const wb = titleWords(b);
-  let shared = 0;
-  for (const w of wa) if (wb.has(w)) shared++;
-  return shared >= 4;
+function toResponse(events: TimelineEvent[]) {
+  return {
+    topics: events.map((e) => ({
+      title: e.title,
+      summary: e.summary,
+      severity: e.severity,
+      timestamp: e.event_date,
+      source: e.sources?.length ? e.sources.join(", ") : undefined,
+      first_seen_at: e.first_seen_at,
+      sighting_count: e.sighting_count,
+    })),
+  };
 }
 
 export async function hotTopicsRoute(c: Context) {
   const body = await readJsonBody(c);
   const forceRefresh = readForceRefresh(c, body);
   const config = getConflictConfig(readConflict(body));
-  const CACHE_KEY = `${CACHE_KEY_BASE}:${config.key}`;
   const WAR_START_DATE = config.timelineStartDate;
 
-  const cached = await getCached(CACHE_KEY, forceRefresh ? FORCE_MIN_AGE_MS : undefined);
-  if (cached) {
-    logCacheHit(PANEL, "perplexity");
-    return c.json(cached);
+  const stored = await getTimeline(config.key, MAX_EVENTS);
+
+  const age = await collectionAgeMs(PANEL, config.key);
+  const threshold = forceRefresh ? FORCE_MIN_COLLECT_AGE_MS : COLLECT_TTL_MS;
+  if (age < threshold) {
+    logCacheHit(PANEL, "openrouter");
+    return c.json(toResponse(stored));
   }
 
-  const perplexityKey = envKey("PERPLEXITY_API_KEY");
   const firecrawlKey = envKey("FIRECRAWL_API_KEY");
-  if (!perplexityKey || !firecrawlKey) {
+  const gatewayKey = envKey("AI_GATEWAY_KEY");
+  if (!gatewayKey || !firecrawlKey) {
+    if (stored.length > 0) return c.json(toResponse(stored));
     return c.json({ error: "Service unavailable" }, 500);
   }
 
@@ -94,16 +116,9 @@ export async function hotTopicsRoute(c: Context) {
     .join("\n\n");
 
   if (!scrapedContent) {
-    console.error("All Firecrawl scrapes returned empty content");
-    return c.json({ topics: [] });
+    console.error("All Firecrawl scrapes returned empty content, timeline unchanged");
+    return c.json(toResponse(stored));
   }
-
-  logCost({
-    panel: PANEL,
-    provider: "perplexity",
-    model: "sonar-pro",
-    costUsd: PRICES.perplexity_sonar_pro,
-  });
 
   const userPrompt = `You are a timeline editor. From the following scraped news content, extract ONLY major developments in the ${config.label} conflict (key topics: ${config.searchTerms}) that occurred between ${WAR_START_DATE} and today (${today}).
 
@@ -122,38 +137,25 @@ Return ONLY this JSON:
 SCRAPED CONTENT:
 ${scrapedContent}`;
 
-  const aiRes = await fetch("https://api.perplexity.ai/chat/completions", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${perplexityKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model: "sonar-pro",
-      messages: [
-        {
-          role: "system",
-          content: `You are a strict timeline editor for the ${config.label} conflict. You ONLY use facts from the provided scraped text. You NEVER add events from memory. Today is ${today}. Return ONLY valid JSON, no markdown.`,
-        },
-        { role: "user", content: userPrompt },
-      ],
-    }),
-  });
-
-  if (!aiRes.ok) {
-    console.error("Perplexity structure call failed:", aiRes.status, await aiRes.text().catch(() => ""));
-    return c.json({ topics: [] });
+  let parsed: { topics?: RawTopic[] };
+  try {
+    parsed = await extractStructured<{ topics: RawTopic[] }>(
+      PANEL,
+      `You are a strict timeline editor for the ${config.label} conflict. You ONLY use facts from the provided scraped text. You NEVER add events from memory. Today is ${today}. Return ONLY valid JSON, no markdown.`,
+      userPrompt,
+      { topics: [] },
+      { maxTokens: 3000 },
+    );
+  } catch (e) {
+    console.error("hot-topics: timeline extraction failed:", e);
+    return c.json(toResponse(stored));
   }
-
-  const aiData: any = await aiRes.json();
-  const content = aiData.choices?.[0]?.message?.content || "{}";
-  const parsed: { topics?: any[] } = extractJson(content) ?? { topics: [] };
 
   const warStart = new Date(WAR_START_DATE).getTime();
   const todayMs = new Date(today + "T23:59:59Z").getTime();
 
-  const inRange = (parsed.topics || []).filter((t: any) => {
-    if (!t || !t.timestamp) return false;
+  const inRange = (parsed.topics || []).filter((t) => {
+    if (!t || !t.timestamp || !t.title) return false;
     const ts = new Date(t.timestamp).getTime();
     if (isNaN(ts)) return false;
     if (ts < warStart || ts > todayMs) {
@@ -163,17 +165,39 @@ ${scrapedContent}`;
     return true;
   });
 
-  inRange.sort((a: any, b: any) => (a.timestamp || "").localeCompare(b.timestamp || ""));
+  const { inserted, merged } = await upsertTimelineEvents(
+    config.key,
+    inRange.map((t) => ({
+      conflict: config.key,
+      title: String(t.title),
+      summary: String(t.summary ?? ""),
+      severity: t.severity,
+      eventDate: String(t.timestamp),
+      source: t.source ? String(t.source) : undefined,
+    })),
+  );
 
-  const deduped: any[] = [];
-  for (const t of inRange) {
-    const dup = deduped.some((kept) => isDuplicate(kept.title || "", t.title || ""));
-    if (!dup) deduped.push(t);
-  }
+  await storeItems(
+    inRange.map((t) => ({
+      source: String(t.source || "news"),
+      externalId: `hot-topics|${config.key}|${toDateOnly(t.timestamp) ?? today}|${String(
+        t.title,
+      ).slice(0, 120)}`,
+      conflict: config.key,
+      panel: PANEL,
+      title: String(t.title),
+      content: `${t.title}\n\n${t.summary ?? ""}`,
+      severity: t.severity,
+      publishedAt: t.timestamp,
+      raw: { collected_by: "hot-topics", scraped_sources: sourcesToScrape },
+    })),
+  );
 
-  const validated = { topics: deduped };
+  await markCollected(PANEL, config.key);
+  console.log(
+    `hot-topics(${config.key}): ${inRange.length} extracted, ${inserted} new, ${merged} merged`,
+  );
 
-  await setCache(CACHE_KEY, validated);
-
-  return c.json(validated);
+  const refreshed = await getTimeline(config.key, MAX_EVENTS);
+  return c.json(toResponse(refreshed.length > 0 ? refreshed : stored));
 }

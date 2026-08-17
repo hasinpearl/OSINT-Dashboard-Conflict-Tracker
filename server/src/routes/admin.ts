@@ -2,8 +2,6 @@ import type { Context, Next } from "hono";
 import { isDbReady, pool } from "../db";
 import { envKey } from "../env";
 
-// This dashboard has no user auth system; admin routes are protected by a
-// static bearer token instead (set ADMIN_TOKEN in the environment).
 export async function requireAdmin(c: Context, next: Next) {
   const configured = envKey("ADMIN_TOKEN");
   const supplied = (c.req.header("authorization") ?? "").replace(/^Bearer\s+/i, "").trim();
@@ -13,13 +11,11 @@ export async function requireAdmin(c: Context, next: Next) {
   await next();
 }
 
-// Presence booleans only — never echo key material.
 export function healthRoute(c: Context) {
   return c.json({
     ok: true,
     db: isDbReady(),
     keys: {
-      perplexity: envKey("PERPLEXITY_API_KEY").length > 0,
       firecrawl: envKey("FIRECRAWL_API_KEY").length > 0,
       ai_gateway: envKey("AI_GATEWAY_KEY").length > 0,
     },
@@ -46,31 +42,14 @@ async function checkProvider(fn: () => Promise<Response>): Promise<ProviderCheck
   }
 }
 
-// Live-tests each provider with a minimal real call so "all panels are down,
-// why?" is a one-click answer (e.g. an invalid key shows as an upstream 401).
 export async function diagnosticsRoute(c: Context) {
-  const perplexityKey = envKey("PERPLEXITY_API_KEY");
   const firecrawlKey = envKey("FIRECRAWL_API_KEY");
   const gatewayKey = envKey("AI_GATEWAY_KEY");
   const gatewayUrl = envKey("AI_GATEWAY_URL") || "https://openrouter.ai/api/v1/chat/completions";
+  //TUNE: Control which model the gateway diagnostics probe uses
+  const probeModel = envKey("OPENROUTER_LIGHT_MODEL") || "perplexity/sonar";
 
-  const [perplexity, firecrawl, aiGateway] = await Promise.all([
-    perplexityKey
-      ? checkProvider(() =>
-          fetch("https://api.perplexity.ai/chat/completions", {
-            method: "POST",
-            headers: {
-              Authorization: `Bearer ${perplexityKey}`,
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              model: "sonar",
-              messages: [{ role: "user", content: "ping" }],
-              max_tokens: 1,
-            }),
-          }),
-        )
-      : Promise.resolve({ configured: false } as ProviderCheck),
+  const [firecrawl, aiGateway] = await Promise.all([
     firecrawlKey
       ? checkProvider(() =>
           fetch("https://api.firecrawl.dev/v1/scrape", {
@@ -92,7 +71,7 @@ export async function diagnosticsRoute(c: Context) {
               "Content-Type": "application/json",
             },
             body: JSON.stringify({
-              model: "google/gemini-2.5-flash",
+              model: probeModel,
               messages: [{ role: "user", content: "ping" }],
               max_tokens: 1,
             }),
@@ -103,12 +82,10 @@ export async function diagnosticsRoute(c: Context) {
 
   return c.json({
     db: isDbReady(),
-    providers: { perplexity, firecrawl, ai_gateway: aiGateway },
+    providers: { firecrawl, ai_gateway: aiGateway },
   });
 }
 
-// The old Supabase admin "summary" view as a plain aggregate query.
-// Cast ::int / ::float8 because pg returns numerics as strings.
 export async function costsSummaryRoute(c: Context) {
   try {
     const { rows } = await pool.query(`

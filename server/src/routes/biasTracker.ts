@@ -1,13 +1,14 @@
 import type { Context } from "hono";
 import { deleteCacheKeys, FORCE_MIN_AGE_MS, getCached, setCache } from "../cache";
-import { logCost, logCacheHit, PRICES } from "../costs";
+import { logCacheHit } from "../costs";
 import { CONFLICT_CONFIG, getConflictConfig, readConflict, type ConflictConfig } from "../conflicts";
-import { envKey } from "../env";
-import { extractJson, readForceRefresh, readJsonBody } from "../request";
+import { searchStructured } from "../agents";
+import { readForceRefresh, readJsonBody } from "../request";
 
 const CACHE_KEY_BASE = "bias-tracker";
 const PANEL = "bias-tracker";
-const CACHE_TTL_MS = 12 * 60 * 60 * 1000; // 12 hours — slow-moving panel
+//TUNE: Control how long a bias result stays fresh before re-analyzing
+const CACHE_TTL_MS = 12 * 60 * 60 * 1000;
 
 interface BiasData {
   total_stories: number;
@@ -57,7 +58,7 @@ function cleanSummary(summary: string): string {
   return cleaned.length > 20 ? cleaned : summary;
 }
 
-async function analyzeOne(perplexityKey: string, config: ConflictConfig): Promise<BiasData | null> {
+async function analyzeOne(config: ConflictConfig): Promise<BiasData | null> {
   const userPrompt = `Analyze up to 20 news stories about the ${config.label} conflict (key topics: ${config.searchTerms}) from the past 7 days. If fewer than 20 stories are available, analyze however many you find - even 5-6 stories is enough for a meaningful bias breakdown. Base your percentages on whatever stories are available. Do NOT mention that you couldn't find 20 stories. Do NOT include meta-commentary about the search results or limitations. Just provide the analysis based on what is available.
 
 Search for coverage across ALL of these source categories:
@@ -86,35 +87,16 @@ Return ONLY this JSON:
 
 {"total_stories":number,"left_count":number,"center_count":number,"right_count":number,"left_pct":number,"center_pct":number,"right_pct":number,"summary":"2-3 sentences explaining the current narrative landscape - what is dominating the conversation and which direction coverage is leaning","top_left_story":"headline of strongest ${config.biasLeftLabel}-sympathetic story","top_center_story":"headline of most neutral story","top_right_story":"headline of strongest ${config.biasRightLabel}-sympathetic story","last_updated":"ISO 8601 UTC timestamp"}`;
 
-  logCost({ panel: PANEL, provider: "perplexity", model: "sonar-pro", costUsd: PRICES.perplexity_sonar_pro });
-  const aiRes = await fetch("https://api.perplexity.ai/chat/completions", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${perplexityKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model: "sonar-pro",
-      messages: [
-        {
-          role: "system",
-          content:
-            "You are a media narrative analyst. Return ONLY valid JSON, no prose, no markdown fences. Timestamps must be ISO 8601 UTC.",
-        },
-        { role: "user", content: userPrompt },
-      ],
-      search_recency_filter: "week",
-    }),
+  const parsed = await searchStructured<Partial<BiasData>>(
+    PANEL,
+    "You are a media narrative analyst. Return ONLY valid JSON, no prose, no markdown fences. Timestamps must be ISO 8601 UTC.",
+    userPrompt,
+    {},
+    { maxTokens: 1500 },
+  ).catch((e) => {
+    console.error(`OpenRouter call failed for ${config.key}:`, e instanceof Error ? e.message : e);
+    return {} as Partial<BiasData>;
   });
-
-  if (!aiRes.ok) {
-    console.error(`Perplexity call failed for ${config.key}:`, aiRes.status, await aiRes.text().catch(() => ""));
-    return null;
-  }
-
-  const aiData: any = await aiRes.json();
-  const content = aiData.choices?.[0]?.message?.content || "{}";
-  const parsed: Partial<BiasData> = extractJson(content) ?? {};
 
   const result: BiasData = {
     total_stories: num(parsed.total_stories, 20),
@@ -139,7 +121,7 @@ Return ONLY this JSON:
     result.left_count + result.center_count + result.right_count > 0;
 
   if (!hasContent) {
-    console.warn(`bias-tracker (${config.key}): empty/invalid result. Raw:`, content.slice(0, 500));
+    console.warn(`bias-tracker (${config.key}): empty/invalid result. Raw parsed:`, JSON.stringify(parsed).slice(0, 500));
     return null;
   }
 
@@ -147,7 +129,6 @@ Return ONLY this JSON:
 }
 
 export async function biasTrackerRoute(c: Context) {
-  // Legacy un-suffixed cache row from the original design; harmless to retry.
   await deleteCacheKeys(["bias-tracker"]);
 
   const body = await readJsonBody(c);
@@ -155,23 +136,17 @@ export async function biasTrackerRoute(c: Context) {
   const config = getConflictConfig(readConflict(body));
   const CACHE_KEY = `${CACHE_KEY_BASE}:${config.key}`;
 
-  // force shrinks the acceptable age to 5 minutes instead of bypassing the
-  // 12h TTL entirely — refresh-spam can't multiply sonar-pro calls.
-  const cached = await getCached(CACHE_KEY, forceRefresh ? FORCE_MIN_AGE_MS : CACHE_TTL_MS);
+  //TUNE: Control the min age a force refresh will accept before re-analyzing
+  const cached = await getCached(CACHE_KEY, forceRefresh ? 5 * 60 * 1000 : CACHE_TTL_MS);
   if (cached) {
-    logCacheHit(PANEL, "perplexity");
+    logCacheHit(PANEL, "openrouter");
     return c.json(cached);
-  }
-
-  const perplexityKey = envKey("PERPLEXITY_API_KEY");
-  if (!perplexityKey) {
-    return c.json({ error: "Service unavailable" }, 500);
   }
 
   if (config.key === "all") {
     const keys = ["iran-us", "ukraine-russia", "china-taiwan"] as const;
     const results = await Promise.all(
-      keys.map((k) => analyzeOne(perplexityKey, CONFLICT_CONFIG[k])),
+      keys.map((k) => analyzeOne(CONFLICT_CONFIG[k])),
     );
 
     const conflicts = keys
@@ -200,7 +175,7 @@ export async function biasTrackerRoute(c: Context) {
     return c.json(response);
   }
 
-  const single = await analyzeOne(perplexityKey, config);
+  const single = await analyzeOne(config);
   if (!single) {
     return c.json({ error: "Upstream analysis failed" }, 502);
   }

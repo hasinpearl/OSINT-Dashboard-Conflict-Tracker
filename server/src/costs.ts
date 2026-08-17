@@ -1,13 +1,16 @@
 import { pool } from "./db";
 
+//TUNE: Control per-call cost estimates used in the admin cost dashboard
 export const PRICES = {
-  firecrawl_scrape: 0.0015,        // ~$1.50 per 1k Firecrawl scrapes (Standard plan)
-  perplexity_sonar: 0.005,         // ~$5/1M tokens, ~1k tokens/call avg
-  perplexity_sonar_pro: 0.015,     // ~$15/1M tokens, ~1k tokens/call avg
+  firecrawl_scrape: 0.0015,
+  openrouter_mid: 0.018,
+  openrouter_light: 0.004,
   google_ai_gemini_flash: 0.0008,
+  perplexity_sonar: 0.005,
+  perplexity_sonar_pro: 0.015,
 } as const;
 
-export type Provider = "firecrawl" | "perplexity" | "google_ai";
+export type Provider = "firecrawl" | "openrouter" | "perplexity" | "google_ai";
 
 interface LogParams {
   panel: string;
@@ -19,7 +22,6 @@ interface LogParams {
   cacheHit?: boolean;
 }
 
-// Fire-and-forget: never await, never fail a request over cost logging.
 export function logCost(params: LogParams): void {
   pool
     .query(
