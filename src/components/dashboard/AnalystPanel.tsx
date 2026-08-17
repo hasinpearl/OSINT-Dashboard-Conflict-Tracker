@@ -26,7 +26,7 @@ export const AnalystPanel = () => {
   const { data, isLoading, error } = useQuery({
     queryKey: ["analyst", conflict],
     queryFn: () =>
-      invokeFn<{ comments: AnalystComment[] }>("perplexity-analyst", {
+      invokeFn<{ comments: AnalystComment[] }>("analyst", {
         conflict,
         ...(shouldForceRefresh(`analyst:${conflict}`) ? { force_refresh: true } : {}),
       }),

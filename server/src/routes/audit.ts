@@ -2,12 +2,12 @@ import type { Context } from "hono";
 import { deleteCacheKeys, getCacheRows } from "../cache";
 import { pool } from "../db";
 
-// "analyst-curated" replaced "perplexity-analyst" — the old base is
-// intentionally absent so its stale cache rows get cleaned as orphans.
+// analyst-curated replaced perplexity-analyst. osint moved off api_cache
+// entirely (see routes/osint.ts, now backed by the items table), so neither
+// old base belongs here.
 const KNOWN_FUNCTIONS = [
   "firecrawl-news",
   "analyst-curated",
-  "perplexity-osint",
   "telegram-feed",
   "ai-summarize",
   "bias-tracker",
@@ -56,7 +56,7 @@ function cleanItems(payload: any): { before: number; after: number; cleanedPaylo
 }
 
 export async function auditRefreshRoute(c: Context) {
-  const auditableBases = ["firecrawl-news", "analyst-curated", "perplexity-osint", "telegram-feed", "ai-summarize"];
+  const auditableBases = ["firecrawl-news", "analyst-curated", "telegram-feed", "ai-summarize"];
   const candidateKeys = auditableBases.flatMap((b) => [b, ...CONFLICT_SUFFIXES.map((s) => `${b}:${s}`)]);
 
   const rows = await getCacheRows(candidateKeys);
