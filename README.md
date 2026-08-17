@@ -4,7 +4,7 @@ Real-time OSINT intelligence dashboard tracking Iran/U.S., Ukraine/Russia, and C
 
 ## Stack
 
-React 18, TypeScript, Vite, Tailwind CSS, Node (Hono) API, PostgreSQL, Perplexity AI, Firecrawl.
+React 18, TypeScript, Vite, Tailwind CSS, Node (Hono) API, PostgreSQL, OpenRouter (Perplexity Sonar models), Firecrawl.
 
 ## Architecture
 
@@ -17,8 +17,8 @@ browser ──► web  (nginx: serves the SPA build, proxies /api)
 ```
 
 - **Firecrawl**: Scrapes news sources and Telegram channels to markdown
-- **Perplexity AI**: Analyzes scraped content and generates intelligence summaries
-- **API server** (`server/`): Caches responses in Postgres (60 min TTL; `force_refresh` shrinks the acceptable age to 5 min instead of bypassing, so refresh-spam can't multiply paid calls), logs per-call costs, and filters analyst commentary to a curated per-conflict expert roster
+- **OpenRouter (Perplexity Sonar / Sonar Pro)**: Analyzes scraped content and generates intelligence summaries — single gateway for every AI panel, including Arabic translation
+- **API server** (`server/`): Persists timeline events in Postgres (`stories`/`items`, merge-on-refresh — a refresh never wipes prior history), caches short-lived responses (60 min TTL; `force_refresh` shrinks the acceptable age to 5 min instead of bypassing, so refresh-spam can't multiply paid calls), logs per-call costs, and filters analyst commentary to a curated per-conflict expert roster
 - **Frontend**: React dashboard with breaking-news ticker, notifications, and multi-language support (Western digits enforced everywhere)
 
 ## Setup
@@ -27,8 +27,7 @@ browser ──► web  (nginx: serves the SPA build, proxies /api)
 
 Create accounts and get API keys from:
 - [Firecrawl](https://firecrawl.dev) - Web scraping API
-- [Perplexity API](https://www.perplexity.ai/api/) - AI analysis API
-- (Optional) An OpenRouter-compatible AI gateway key for Arabic translation
+- [OpenRouter](https://openrouter.ai) - AI gateway for every AI panel (analysis + Arabic translation). Defaults to Perplexity's `sonar` / `sonar-pro` models — same models this dashboard always used, now billed through one key instead of a separate Perplexity account.
 
 ### Local Development
 
@@ -46,8 +45,9 @@ npm run dev             # http://localhost:8080 (proxies /api to :8787)
 All configuration lives in the root `.env` (see `.env.example` for the full list):
 
 - `FIRECRAWL_API_KEY` — used by `firecrawl-news`, `telegram-feed`, `ai-summarize`
-- `PERPLEXITY_API_KEY` — used by all analysis routes
-- `AI_GATEWAY_URL` / `AI_GATEWAY_KEY` — Arabic translation gateway (optional)
+- `AI_GATEWAY_URL` / `AI_GATEWAY_KEY` — OpenRouter gateway, powers every AI panel (analysis routes + Arabic translation). Key required, URL optional.
+- `OPENROUTER_LIGHT_MODEL` / `OPENROUTER_MID_MODEL` — override the default `perplexity/sonar` / `perplexity/sonar-pro` model pair (optional)
+- `TIMELINE_MAX_EVENTS` — cap on events returned per conflict timeline, default 40 (optional)
 - `ADMIN_TOKEN` — bearer token for `/api/audit-refresh`, `/api/admin/diagnostics`, `/api/admin/costs`
 - `DATABASE_URL` — Postgres connection for local dev (docker-compose wires its own)
 

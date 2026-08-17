@@ -56,7 +56,7 @@ browser ──► web  (nginx: serves the SPA build, proxies /api)
     Also `pool.on("error", ...)` so idle-client errors don't crash the process.
   - Trim keys: `(v ?? "").trim().replace(/^["']|["']$/g, "")` on every API key —
     env UIs (Coolify etc.) love to smuggle whitespace/quotes in.
-  - `GET /api/health` returns `{ ok, keys: { perplexity: bool, ... } }`
+  - `GET /api/health` returns `{ ok, keys: { firecrawl: bool, ai_gateway: bool, ... } }`
     (presence booleans only) and `GET /api/admin/diagnostics` (auth-protected)
     live-tests each provider with a minimal real call and returns exact status
     codes + truncated error bodies. These two endpoints turned "all panels are
