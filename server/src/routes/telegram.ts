@@ -2,8 +2,9 @@ import type { Context } from "hono";
 import { deleteCacheKeys, FORCE_MIN_AGE_MS, getCached, setCache } from "../cache";
 import { logCost, logCacheHit, PRICES } from "../costs";
 import { getConflictConfig, readConflict } from "../conflicts";
+import { extractStructured } from "../agents";
 import { envKey } from "../env";
-import { extractJson, readForceRefresh, readJsonBody } from "../request";
+import { readForceRefresh, readJsonBody } from "../request";
 
 const CACHE_KEY_BASE = "telegram-feed";
 const PANEL = "telegram";
@@ -63,41 +64,19 @@ async function scrapeChannel(firecrawlKey: string, channel: string): Promise<str
   return null;
 }
 
-async function parseWithPerplexity(
-  perplexityKey: string,
+async function parseWithAgent(
   content: string,
   conflictFilter: string,
 ): Promise<any[]> {
-  logCost({ panel: PANEL, provider: "perplexity", model: "sonar", costUsd: PRICES.perplexity_sonar });
-  const res = await fetch("https://api.perplexity.ai/chat/completions", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${perplexityKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model: "sonar",
-      messages: [
-        {
-          role: "system",
-          content: "Extract Telegram posts from scraped content. Return ONLY valid JSON, no markdown.",
-        },
-        {
-          role: "user",
-          content: `Extract individual posts from these Telegram channels.${conflictFilter} Return JSON: {"messages":[{"channel":"username","text":"post text, 1-2 sentences","timestamp":"ISO 8601 UTC timestamp in full ISO 8601 format YYYY-MM-DDTHH:mm:ssZ, e.g. 2026-04-28T14:30:00Z","message_id":number}]}. The timestamp MUST be a valid ISO 8601 UTC timestamp in full ISO 8601 format YYYY-MM-DDTHH:mm:ssZ. Do not use relative timestamps or space-separated date/time formats. Most recent first, up to 15 messages.\n\n${content}`,
-        },
-      ],
-    }),
+  const parsed = await extractStructured<{ messages?: any[] }>(
+    PANEL,
+    "Extract Telegram posts from scraped content. Return ONLY valid JSON, no markdown.",
+    `Extract individual posts from these Telegram channels.${conflictFilter} Return JSON: {"messages":[{"channel":"username","text":"post text, 1-2 sentences","timestamp":"ISO 8601 UTC timestamp in full ISO 8601 format YYYY-MM-DDTHH:mm:ssZ, e.g. 2026-04-28T14:30:00Z","message_id":number}]}. The timestamp MUST be a valid ISO 8601 UTC timestamp in full ISO 8601 format YYYY-MM-DDTHH:mm:ssZ. Do not use relative timestamps or space-separated date/time formats. Most recent first, up to 15 messages.\n\n${content}`,
+    { messages: [] },
+  ).catch((e) => {
+    console.error("OpenRouter error (telegram):", e instanceof Error ? e.message : e);
+    return { messages: [] };
   });
-
-  if (!res.ok) {
-    console.error("Perplexity error:", res.status, await res.text().catch(() => ""));
-    return [];
-  }
-
-  const data: any = await res.json();
-  const raw = data.choices?.[0]?.message?.content || "{}";
-  const parsed = extractJson(raw) ?? { messages: [] };
   return parsed.messages || [];
 }
 
@@ -127,12 +106,12 @@ export async function telegramRoute(c: Context) {
       console.log(`Telegram cache newest post age: ${ageHours}h (key: ${CACHE_KEY})`);
 
       if (isNaN(newestAgeMs) || newestAgeMs > MAX_NEWEST_POST_AGE_MS) {
-        console.log("Cache STALE (newest post >2h old) - clearing all telegram-feed cache rows");
-        await clearAllTelegramCache();
-      } else {
-        logCacheHit(PANEL, "firecrawl");
-        return c.json(cached);
-      }
+          console.log("Cache STALE (newest post >2h old) - clearing all telegram-feed cache rows");
+          await clearAllTelegramCache();
+        } else {
+          logCacheHit(PANEL, "firecrawl");
+          return c.json(cached);
+        }
     } else {
       console.log("Telegram cache has no post timestamps - treating as stale");
       await clearAllTelegramCache();
@@ -140,9 +119,8 @@ export async function telegramRoute(c: Context) {
   }
 
   const firecrawlKey = envKey("FIRECRAWL_API_KEY");
-  const perplexityKey = envKey("PERPLEXITY_API_KEY");
 
-  if (!firecrawlKey || !perplexityKey) {
+  if (!firecrawlKey) {
     return c.json({ messages: [] });
   }
 
@@ -158,9 +136,9 @@ export async function telegramRoute(c: Context) {
 
   const mid = Math.ceil(allContent.length / 2);
   const [msgs1, msgs2] = await Promise.all([
-    parseWithPerplexity(perplexityKey, allContent.slice(0, mid).join("\n---\n"), conflictFilter),
+    parseWithAgent(allContent.slice(0, mid).join("\n---\n"), conflictFilter),
     allContent.length > mid
-      ? parseWithPerplexity(perplexityKey, allContent.slice(mid).join("\n---\n"), conflictFilter)
+      ? parseWithAgent(allContent.slice(mid).join("\n---\n"), conflictFilter)
       : Promise.resolve([]),
   ]);
 

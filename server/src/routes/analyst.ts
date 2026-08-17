@@ -1,9 +1,9 @@
 import type { Context } from "hono";
 import { FORCE_MIN_AGE_MS, getCached, setCache } from "../cache";
-import { logCost, logCacheHit, PRICES } from "../costs";
+import { logCacheHit } from "../costs";
 import { getConflictConfig, readConflict, type Expert } from "../conflicts";
-import { envKey } from "../env";
-import { extractJson, readForceRefresh, readJsonBody } from "../request";
+import { searchStructured } from "../agents";
+import { readForceRefresh, readJsonBody } from "../request";
 
 // New cache key base on purpose: old "perplexity-analyst" entries hold
 // random commentators and must age out as orphans, not poison this panel.
@@ -62,34 +62,19 @@ export async function analystRoute(c: Context) {
 
   const cached = await getCached(CACHE_KEY, forceRefresh ? FORCE_MIN_AGE_MS : undefined);
   if (cached) {
-    logCacheHit(PANEL, "perplexity");
+    logCacheHit(PANEL, "openrouter");
     return c.json(cached);
-  }
-
-  const perplexityKey = envKey("PERPLEXITY_API_KEY");
-  if (!perplexityKey) {
-    return c.json({ error: "Service unavailable" }, 500);
   }
 
   const roster = `${rosterSection(config.experts, "official", "OFFICIALS")}\n\n${rosterSection(config.experts, "analyst", "EXPERT ANALYSTS")}`;
 
-  logCost({ panel: PANEL, provider: "perplexity", model: "sonar-pro", costUsd: PRICES.perplexity_sonar_pro });
-  const res = await fetch("https://api.perplexity.ai/chat/completions", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${perplexityKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model: "sonar-pro",
-      messages: [
-        {
-          role: "system",
-          content: `You are a geopolitical research assistant focused on the ${config.label} conflict in ${config.region}. You report ONLY real, recent public statements from a fixed list of approved officials and analysts. Return ONLY valid JSON with no markdown.`,
-        },
-        {
-          role: "user",
-          content: `Find the most recent public statements and analysis about the ${config.label} conflict (key topics: ${config.searchTerms}) from the people below.
+  // Perplexity's `search_recency_filter: "month"` has no OpenRouter
+  // equivalent — the "prefer the past 2 weeks, at most 1 month old" line
+  // below is now load-bearing prompt instruction, not decoration.
+  const parsed = await searchStructured<{ comments?: AnalystComment[] }>(
+    PANEL,
+    `You are a geopolitical research assistant focused on the ${config.label} conflict in ${config.region}. You report ONLY real, recent public statements from a fixed list of approved officials and analysts. Return ONLY valid JSON with no markdown.`,
+    `Find the most recent public statements and analysis about the ${config.label} conflict (key topics: ${config.searchTerms}) from the people below.
 
 ${roster}
 
@@ -101,20 +86,11 @@ STRICT RULES:
 - Return each person's name EXACTLY as it is written in the list above.
 
 Return JSON: {"comments":[{"analyst":"name exactly as listed","affiliation":"affiliation exactly as listed","comment":"their key quote or analysis, 2-3 sentences","topic":"brief topic","timestamp":"ISO 8601 UTC timestamp e.g. 2026-04-28T14:30:00Z","url":"source url if available"}]}. The timestamp MUST be a valid ISO 8601 UTC timestamp. Do not use relative timestamps. Include as many people from the list as you can find real recent statements for.`,
-        },
-      ],
-      search_recency_filter: "month",
-    }),
+    { comments: [] },
+  ).catch((e) => {
+    console.error("OpenRouter error (analyst):", e instanceof Error ? e.message : e);
+    return { comments: [] };
   });
-
-  if (!res.ok) {
-    console.error("Perplexity error status:", res.status, "body:", await res.text().catch(() => ""));
-    return c.json({ comments: [] });
-  }
-
-  const data: any = await res.json();
-  const content = data.choices?.[0]?.message?.content || "{}";
-  const parsed = extractJson(content) ?? { comments: [] };
 
   const filtered = {
     comments: filterToRoster(
