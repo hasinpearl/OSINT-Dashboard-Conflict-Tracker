@@ -1,21 +1,3 @@
-/**
- * PROPOSED — awaiting Hessa's review before any commit.
- *
- * Hot-topics timeline. Two changes vs. the current version:
- *
- *  1. AI calls go through the OpenRouter gateway (agents.ts), not Perplexity.
- *     This panel extracts structure from text we already scraped, so it uses
- *     the cheap `light` tier — no web grounding needed. Same tier private-demo
- *     already uses for this exact panel.
- *
- *  2. The timeline is READ FROM STORAGE and only ever APPENDED TO. Previously
- *     the response was re-derived from whatever the day's four front-page
- *     scrapes happened to mention, then written over the single api_cache blob
- *     — so any event missing from today's scrape vanished. Now:
- *       collect → upsertTimelineEvents() (merge by conflict+event) → re-read
- *     A failed scrape or a failed AI call degrades to "timeline unchanged",
- *     never to "timeline empty".
- */
 import type { Context } from "hono";
 import { extractStructured } from "../agents";
 import { logCost, logCacheHit, PRICES } from "../costs";
@@ -34,15 +16,11 @@ import {
 
 const PANEL = "hot-topics";
 
-// How long a collection pass stays "fresh enough" to skip re-collecting.
-const COLLECT_TTL_MS = 60 * 60 * 1000; // 60 minutes, matches the old cache TTL
-// Hard refreshes shrink the window instead of bypassing it, so F5-spam cannot
-// multiply paid upstream calls. Same guard the old cache layer had.
+//TUNE: Control how long a collection pass stays fresh before re-collecting
+const COLLECT_TTL_MS = 60 * 60 * 1000;
+//TUNE: Control the min age a force refresh will accept before re-collecting
 const FORCE_MIN_COLLECT_AGE_MS = 5 * 60 * 1000;
-
-// The dashboard renders a scrollable timeline and the Arabic translation route
-// caps its input at 50 KB, so the response is capped rather than unbounded.
-// The full history stays in Postgres regardless of this number.
+//TUNE: Control how many timeline events are returned per response
 const MAX_EVENTS = Number(envKey("TIMELINE_MAX_EVENTS") || 40);
 
 interface RawTopic {
@@ -80,7 +58,6 @@ async function firecrawlScrape(url: string, apiKey: string): Promise<string> {
   }
 }
 
-/** Storage rows → the response shape the frontend already consumes. */
 function toResponse(events: TimelineEvent[]) {
   return {
     topics: events.map((e) => ({
@@ -89,7 +66,6 @@ function toResponse(events: TimelineEvent[]) {
       severity: e.severity,
       timestamp: e.event_date,
       source: e.sources?.length ? e.sources.join(", ") : undefined,
-      // Extra, additive fields — safe for the existing UI to ignore.
       first_seen_at: e.first_seen_at,
       sighting_count: e.sighting_count,
     })),
@@ -102,25 +78,18 @@ export async function hotTopicsRoute(c: Context) {
   const config = getConflictConfig(readConflict(body));
   const WAR_START_DATE = config.timelineStartDate;
 
-  // Storage is the source of truth, always read first.
   const stored = await getTimeline(config.key, MAX_EVENTS);
 
   const age = await collectionAgeMs(PANEL, config.key);
   const threshold = forceRefresh ? FORCE_MIN_COLLECT_AGE_MS : COLLECT_TTL_MS;
   if (age < threshold) {
     logCacheHit(PANEL, "openrouter");
-    console.log(
-      `hot-topics: last collection ${Math.round(age / 1000)}s ago (<${Math.round(
-        threshold / 1000,
-      )}s), serving ${stored.length} stored events`,
-    );
     return c.json(toResponse(stored));
   }
 
   const firecrawlKey = envKey("FIRECRAWL_API_KEY");
   const gatewayKey = envKey("AI_GATEWAY_KEY");
   if (!gatewayKey || !firecrawlKey) {
-    // Misconfiguration must not blank an existing timeline.
     if (stored.length > 0) return c.json(toResponse(stored));
     return c.json({ error: "Service unavailable" }, 500);
   }
@@ -147,7 +116,7 @@ export async function hotTopicsRoute(c: Context) {
     .join("\n\n");
 
   if (!scrapedContent) {
-    console.error("All Firecrawl scrapes returned empty content — timeline unchanged");
+    console.error("All Firecrawl scrapes returned empty content, timeline unchanged");
     return c.json(toResponse(stored));
   }
 
@@ -179,7 +148,6 @@ ${scrapedContent}`;
     );
   } catch (e) {
     console.error("hot-topics: timeline extraction failed:", e);
-    // Do NOT mark collected — a provider error should be retried, not cached.
     return c.json(toResponse(stored));
   }
 
@@ -197,9 +165,6 @@ ${scrapedContent}`;
     return true;
   });
 
-  // Append/merge. Cross-run and in-batch de-duplication now lives in
-  // timeline.ts (deterministic event_key + fuzzy title match inside a +/-3 day
-  // window), so the old in-memory isDuplicate() pass is gone.
   const { inserted, merged } = await upsertTimelineEvents(
     config.key,
     inRange.map((t) => ({
@@ -212,8 +177,6 @@ ${scrapedContent}`;
     })),
   );
 
-  // Keep the raw observation behind each event, so "which scrape first
-  // reported this?" stays answerable after the fact.
   await storeItems(
     inRange.map((t) => ({
       source: String(t.source || "news"),
@@ -232,11 +195,9 @@ ${scrapedContent}`;
 
   await markCollected(PANEL, config.key);
   console.log(
-    `hot-topics(${config.key}): ${inRange.length} extracted → ${inserted} new, ${merged} merged`,
+    `hot-topics(${config.key}): ${inRange.length} extracted, ${inserted} new, ${merged} merged`,
   );
 
-  // Re-read so the response reflects the merged, permanent timeline rather than
-  // only what this one pass happened to see.
   const refreshed = await getTimeline(config.key, MAX_EVENTS);
   return c.json(toResponse(refreshed.length > 0 ? refreshed : stored));
 }

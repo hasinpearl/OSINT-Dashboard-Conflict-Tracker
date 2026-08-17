@@ -8,7 +8,8 @@ import { readForceRefresh, readJsonBody } from "../request";
 
 const CACHE_KEY_BASE = "telegram-feed";
 const PANEL = "telegram";
-const MAX_NEWEST_POST_AGE_MS = 2 * 60 * 60 * 1000; // 2 hours
+//TUNE: Control max age of the newest cached post before forcing a re-scrape
+const MAX_NEWEST_POST_AGE_MS = 2 * 60 * 60 * 1000;
 
 async function clearAllTelegramCache(): Promise<void> {
   const keys = [
@@ -106,14 +107,14 @@ export async function telegramRoute(c: Context) {
       console.log(`Telegram cache newest post age: ${ageHours}h (key: ${CACHE_KEY})`);
 
       if (isNaN(newestAgeMs) || newestAgeMs > MAX_NEWEST_POST_AGE_MS) {
-          console.log("Cache STALE (newest post >2h old) - clearing all telegram-feed cache rows");
-          await clearAllTelegramCache();
-        } else {
-          logCacheHit(PANEL, "firecrawl");
-          return c.json(cached);
-        }
+        console.log("Cache STALE, clearing all telegram-feed cache rows");
+        await clearAllTelegramCache();
+      } else {
+        logCacheHit(PANEL, "firecrawl");
+        return c.json(cached);
+      }
     } else {
-      console.log("Telegram cache has no post timestamps - treating as stale");
+      console.log("Telegram cache has no post timestamps, treating as stale");
       await clearAllTelegramCache();
     }
   }

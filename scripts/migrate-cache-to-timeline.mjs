@@ -1,22 +1,16 @@
 #!/usr/bin/env node
-/**
- * PROPOSED — awaiting Hessa's review before any commit. NOT RUN by the audit.
- *
- * One-shot backfill: lift whatever timeline/OSINT history is still sitting in
- * the `api_cache` blobs into the new `stories` / `items` tables, so the
- * migration does not start the timeline from zero.
- *
- * It is idempotent (all writes are ON CONFLICT merges) and READ-ONLY with
- * respect to api_cache — nothing is deleted, so a rollback is just "point the
- * routes back at the old code".
- *
- * Usage (from repo root, after `npm --prefix server install`):
- *   DATABASE_URL=postgres://... node scripts/migrate-cache-to-timeline.mjs --dry-run
- *   DATABASE_URL=postgres://... node scripts/migrate-cache-to-timeline.mjs
- *
- * Requires the new schema to exist already: start the API once with the updated
- * db.ts (initDb applies it), or apply the CREATE TABLE block by hand.
- */
+// PROPOSED, awaiting Hessa's review before any commit. NOT RUN by the audit.
+//
+// One-shot backfill: lifts timeline/OSINT history from api_cache blobs into
+// the stories/items tables so migration does not start the timeline at zero.
+// Idempotent (all writes are ON CONFLICT merges), read-only on api_cache.
+//
+// Usage (from repo root, after npm --prefix server install):
+//   DATABASE_URL=postgres://... node scripts/migrate-cache-to-timeline.mjs --dry-run
+//   DATABASE_URL=postgres://... node scripts/migrate-cache-to-timeline.mjs
+//
+// Requires the new schema to exist already: start the API once with the
+// updated db.ts (initDb applies it), or apply the CREATE TABLE block by hand.
 import pg from "pg";
 
 const DRY_RUN = process.argv.includes("--dry-run");

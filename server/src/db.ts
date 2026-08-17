@@ -6,7 +6,6 @@ const connectionString =
 
 export const pool = new pg.Pool({ connectionString });
 
-// Idle-client errors must not crash the process.
 pool.on("error", (err) => {
   console.error("pg pool idle error:", err.message);
 });
@@ -29,17 +28,6 @@ CREATE TABLE IF NOT EXISTS api_cost_log (
   created_at timestamptz NOT NULL DEFAULT now()
 );
 
--- ── OSINT intelligence store ────────────────────────────────────────────────
--- Permanent, per-conflict / per-event storage. api_cache above stays exactly as
--- it is: it remains a short-lived RESPONSE cache. It is no longer the only place
--- timeline history lives, so a cache eviction can never wipe the timeline.
---
--- 'stories' = one row per real-world event, per conflict. Merged on re-sighting,
---             never replaced and never deleted.
--- 'items'   = raw per-source observations behind those events.
--- Shape is deliberately identical to the table names used by private-demo and
--- osintcrawler so the three systems can converge on one schema.
-
 CREATE TABLE IF NOT EXISTS stories (
   id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   conflict text NOT NULL DEFAULT 'all',
@@ -55,8 +43,6 @@ CREATE TABLE IF NOT EXISTS stories (
   last_seen_at timestamptz NOT NULL DEFAULT now()
 );
 
--- Idempotent converge step: harmless on a fresh DB, and it upgrades an older
--- 'stories' table (e.g. the private-demo shape) in place without data loss.
 ALTER TABLE stories ADD COLUMN IF NOT EXISTS conflict text NOT NULL DEFAULT 'all';
 ALTER TABLE stories ADD COLUMN IF NOT EXISTS event_key text;
 ALTER TABLE stories ADD COLUMN IF NOT EXISTS summary text NOT NULL DEFAULT '';
@@ -96,14 +82,9 @@ CREATE TABLE IF NOT EXISTS items (
 CREATE INDEX IF NOT EXISTS items_published_at_idx ON items (published_at DESC NULLS LAST);
 CREATE INDEX IF NOT EXISTS items_conflict_panel_idx ON items (conflict, panel);
 CREATE INDEX IF NOT EXISTS items_story_id_idx ON items (story_id);
--- 'simple' config: content is multilingual (English + Arabic); a stemmed config
--- would mangle it.
 CREATE INDEX IF NOT EXISTS items_content_fts_idx ON items
   USING GIN (to_tsvector('simple', content));
 
--- Records that a collection pass ran, independently of whether it found
--- anything. Without this, a pass that legitimately returns zero events looks
--- identical to "never collected" and would re-hit the paid APIs every request.
 CREATE TABLE IF NOT EXISTS collection_runs (
   panel text NOT NULL,
   conflict text NOT NULL,
@@ -117,8 +98,6 @@ export function isDbReady(): boolean {
   return ready;
 }
 
-// Never await the DB before listening: auth and upstream AI calls work
-// without Postgres — only caching/cost logging pause until it connects.
 export function initDb(): void {
   void (async () => {
     for (;;) {

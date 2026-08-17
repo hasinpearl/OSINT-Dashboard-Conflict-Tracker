@@ -7,7 +7,8 @@ import { readForceRefresh, readJsonBody } from "../request";
 
 const CACHE_KEY_BASE = "bias-tracker";
 const PANEL = "bias-tracker";
-const CACHE_TTL_MS = 12 * 60 * 60 * 1000; // 12 hours — slow-moving panel
+//TUNE: Control how long a bias result stays fresh before re-analyzing
+const CACHE_TTL_MS = 12 * 60 * 60 * 1000;
 
 interface BiasData {
   total_stories: number;
@@ -86,8 +87,6 @@ Return ONLY this JSON:
 
 {"total_stories":number,"left_count":number,"center_count":number,"right_count":number,"left_pct":number,"center_pct":number,"right_pct":number,"summary":"2-3 sentences explaining the current narrative landscape - what is dominating the conversation and which direction coverage is leaning","top_left_story":"headline of strongest ${config.biasLeftLabel}-sympathetic story","top_center_story":"headline of most neutral story","top_right_story":"headline of strongest ${config.biasRightLabel}-sympathetic story","last_updated":"ISO 8601 UTC timestamp"}`;
 
-  // Perplexity's `search_recency_filter: "week"` has no OpenRouter equivalent
-  // — "from the past 7 days" in the prompt above is now load-bearing.
   const parsed = await searchStructured<Partial<BiasData>>(
     PANEL,
     "You are a media narrative analyst. Return ONLY valid JSON, no prose, no markdown fences. Timestamps must be ISO 8601 UTC.",
@@ -130,7 +129,6 @@ Return ONLY this JSON:
 }
 
 export async function biasTrackerRoute(c: Context) {
-  // Legacy un-suffixed cache row from the original design; harmless to retry.
   await deleteCacheKeys(["bias-tracker"]);
 
   const body = await readJsonBody(c);
@@ -138,9 +136,8 @@ export async function biasTrackerRoute(c: Context) {
   const config = getConflictConfig(readConflict(body));
   const CACHE_KEY = `${CACHE_KEY_BASE}:${config.key}`;
 
-  // force shrinks the acceptable age to 5 minutes instead of bypassing the
-  // 12h TTL entirely — refresh-spam can't multiply sonar-pro calls.
-  const cached = await getCached(CACHE_KEY, forceRefresh ? FORCE_MIN_AGE_MS : CACHE_TTL_MS);
+  //TUNE: Control the min age a force refresh will accept before re-analyzing
+  const cached = await getCached(CACHE_KEY, forceRefresh ? 5 * 60 * 1000 : CACHE_TTL_MS);
   if (cached) {
     logCacheHit(PANEL, "openrouter");
     return c.json(cached);

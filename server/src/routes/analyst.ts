@@ -5,8 +5,6 @@ import { getConflictConfig, readConflict, type Expert } from "../conflicts";
 import { searchStructured } from "../agents";
 import { readForceRefresh, readJsonBody } from "../request";
 
-// New cache key base on purpose: old "perplexity-analyst" entries hold
-// random commentators and must age out as orphans, not poison this panel.
 const CACHE_KEY_BASE = "analyst-curated";
 const PANEL = "analyst";
 
@@ -36,8 +34,6 @@ function rosterSection(experts: Expert[], kind: Expert["kind"], heading: string)
   return `${heading}:\n${rows}`;
 }
 
-// Never trust the model to obey the roster — filter server-side. Two-way
-// includes handles "Secretary of State Marco Rubio" vs "Marco Rubio" vs "Rubio".
 function filterToRoster(comments: AnalystComment[], experts: Expert[]): AnalystComment[] {
   const allowed = experts.map((e) => ({ ...e, norm: normName(e.name) }));
   const kept: AnalystComment[] = [];
@@ -68,9 +64,6 @@ export async function analystRoute(c: Context) {
 
   const roster = `${rosterSection(config.experts, "official", "OFFICIALS")}\n\n${rosterSection(config.experts, "analyst", "EXPERT ANALYSTS")}`;
 
-  // Perplexity's `search_recency_filter: "month"` has no OpenRouter
-  // equivalent — the "prefer the past 2 weeks, at most 1 month old" line
-  // below is now load-bearing prompt instruction, not decoration.
   const parsed = await searchStructured<{ comments?: AnalystComment[] }>(
     PANEL,
     `You are a geopolitical research assistant focused on the ${config.label} conflict in ${config.region}. You report ONLY real, recent public statements from a fixed list of approved officials and analysts. Return ONLY valid JSON with no markdown.`,

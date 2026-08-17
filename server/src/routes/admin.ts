@@ -1,8 +1,7 @@
 import type { Context, Next } from "hono";
 import { isDbReady, pool } from "../db";
 import { envKey } from "../env";
-// This dashboard has no user auth system; admin routes are protected by a
-// static bearer token instead (set ADMIN_TOKEN in the environment).
+
 export async function requireAdmin(c: Context, next: Next) {
   const configured = envKey("ADMIN_TOKEN");
   const supplied = (c.req.header("authorization") ?? "").replace(/^Bearer\s+/i, "").trim();
@@ -12,7 +11,6 @@ export async function requireAdmin(c: Context, next: Next) {
   await next();
 }
 
-// Presence booleans only — never echo key material.
 export function healthRoute(c: Context) {
   return c.json({
     ok: true,
@@ -44,14 +42,11 @@ async function checkProvider(fn: () => Promise<Response>): Promise<ProviderCheck
   }
 }
 
-// Live-tests the gateway with a minimal real call so "all panels are down,
-// why?" is a one-click answer (e.g. an invalid key shows as an upstream 401).
 export async function diagnosticsRoute(c: Context) {
   const firecrawlKey = envKey("FIRECRAWL_API_KEY");
   const gatewayKey = envKey("AI_GATEWAY_KEY");
   const gatewayUrl = envKey("AI_GATEWAY_URL") || "https://openrouter.ai/api/v1/chat/completions";
-  // Probe with the actual light-tier model this repo calls, not a hard-coded
-  // stand-in — a rotation of OPENROUTER_LIGHT_MODEL should show up here too.
+  //TUNE: Control which model the gateway diagnostics probe uses
   const probeModel = envKey("OPENROUTER_LIGHT_MODEL") || "perplexity/sonar";
 
   const [firecrawl, aiGateway] = await Promise.all([
@@ -91,8 +86,6 @@ export async function diagnosticsRoute(c: Context) {
   });
 }
 
-// The old Supabase admin "summary" view as a plain aggregate query.
-// Cast ::int / ::float8 because pg returns numerics as strings.
 export async function costsSummaryRoute(c: Context) {
   try {
     const { rows } = await pool.query(`

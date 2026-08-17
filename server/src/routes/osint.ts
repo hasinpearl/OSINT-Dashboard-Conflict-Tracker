@@ -1,17 +1,3 @@
-/**
- * PROPOSED — awaiting Hessa's review before any commit.
- *
- * OSINT items panel. Two changes vs. the current version:
- *
- *  1. Perplexity `sonar` + `search_domain_filter` → OpenRouter `search` tier
- *     (mid model + web plugin). OpenRouter has no domain-filter parameter, so
- *     the source restriction moves into the prompt and is re-checked in code.
- *
- *  2. Results are persisted per item (items table, dedup on source+external_id)
- *     and the response is the union of this pass and what is already stored.
- *     A bad pass therefore degrades to "same items as before", never to an
- *     empty panel — and the api_cache blob is no longer the only copy.
- */
 import type { Context } from "hono";
 import { searchStructured } from "../agents";
 import { logCacheHit } from "../costs";
@@ -21,8 +7,11 @@ import { readForceRefresh, readJsonBody } from "../request";
 import { collectionAgeMs, getRecentItems, markCollected, storeItems } from "../timeline";
 
 const PANEL = "osint";
+//TUNE: Control how long a collection pass stays fresh before re-collecting
 const COLLECT_TTL_MS = 60 * 60 * 1000;
+//TUNE: Control the min age a force refresh will accept before re-collecting
 const FORCE_MIN_COLLECT_AGE_MS = 5 * 60 * 1000;
+//TUNE: Control how many items are returned per panel load
 const MAX_ITEMS = 6;
 
 const ALLOWED_HOSTS = ["bellingcat.com", "janes.com", "twitter.com", "x.com"];
@@ -40,7 +29,6 @@ function hasHttpUrl(u: unknown): u is string {
   return typeof u === "string" && /^https?:\/\//i.test(u.trim());
 }
 
-/** Rows from `items` → the shape the OsintPanel already renders. */
 function toResponse(rows: any[]) {
   return {
     items: rows.map((r) => ({
@@ -78,9 +66,6 @@ export async function osintRoute(c: Context) {
     parsed = await searchStructured<{ items: RawOsintItem[] }>(
       PANEL,
       `You are an OSINT analyst covering the ${config.label} conflict in ${config.region}. Return ONLY valid JSON with no markdown.`,
-      // The domain restriction lived in Perplexity's search_domain_filter, which
-      // OpenRouter's web plugin does not have — it is stated here instead and
-      // re-verified in code below.
       `Find the top ${MAX_ITEMS} verified OSINT intelligence items about ${config.label} from open sources. STRONGLY PREFER these domains: ${ALLOWED_HOSTS.join(
         ", ",
       )} (Bellingcat, Janes Defence, OSINT analysts on X/Twitter). Include the most recent items available. Each item MUST have a valid source URL. Do NOT return a message saying no data is available - always return your best findings even if they are older. Focus on military and security activities in ${config.region} relevant to the ${config.label} conflict (key topics: ${config.searchTerms}). Return ONLY JSON: {"items":[{"title":"...","summary":"2 sentences","source":"source name","confidence":"verified|unverified|developing","timestamp":"ISO 8601 UTC timestamp e.g. 2026-04-28T14:30:00Z","url":"https://..."}]}. The timestamp MUST be a valid ISO 8601 UTC timestamp. Do not use relative timestamps. Every item MUST include a valid, clickable source URL from the original report. If you cannot provide a verified source URL for an item, do not include that item.`,
@@ -96,8 +81,6 @@ export async function osintRoute(c: Context) {
   if (fresh.length > 0) {
     const inserted = await storeItems(
       fresh.map((it) => ({
-        // url is the natural dedup key: the same report re-surfaced tomorrow
-        // will hit ON CONFLICT DO NOTHING and keep its original timestamp.
         source: String(it.source || "osint"),
         externalId: String(it.url).trim(),
         conflict: config.key,
@@ -110,7 +93,7 @@ export async function osintRoute(c: Context) {
         raw: { collected_by: "osint-search" },
       })),
     );
-    console.log(`osint(${config.key}): ${fresh.length} returned → ${inserted} new stored`);
+    console.log(`osint(${config.key}): ${fresh.length} returned, ${inserted} new stored`);
   } else {
     console.log(`osint(${config.key}): no usable items this pass, storage unchanged`);
   }
