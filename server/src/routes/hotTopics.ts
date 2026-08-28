@@ -13,6 +13,7 @@ import {
   upsertTimelineEvents,
   type TimelineEvent,
 } from "../timeline";
+import { AppError } from "../errors";
 
 const PANEL = "hot-topics";
 
@@ -91,7 +92,7 @@ export async function hotTopicsRoute(c: Context) {
   const gatewayKey = envKey("AI_GATEWAY_KEY");
   if (!gatewayKey || !firecrawlKey) {
     if (stored.length > 0) return c.json(toResponse(stored));
-    return c.json({ error: "Service unavailable" }, 500);
+    throw new AppError("firecrawl_error");
   }
 
   const today = new Date().toISOString().split("T")[0];

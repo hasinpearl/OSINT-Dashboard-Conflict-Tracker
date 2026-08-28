@@ -3,6 +3,7 @@ import { logCost, PRICES } from "../costs";
 import { toLatinDigits } from "../digits";
 import { envKey } from "../env";
 import { extractJson } from "../request";
+import { AppError } from "../errors";
 
 const ALLOWED_LANGS = ["ar"] as const;
 const MAX_PAYLOAD_BYTES = 50_000; // 50 KB cap on translation input
@@ -154,7 +155,7 @@ async function translateChunkWithRetry(
 export async function translateRoute(c: Context) {
   const AI_GATEWAY_KEY = envKey("AI_GATEWAY_KEY");
   if (!AI_GATEWAY_KEY) {
-    return c.json({ error: "Service unavailable" }, 500);
+    throw new AppError("gateway_not_configured");
   }
 
   const contentLength = Number(c.req.header("content-length") || "0");

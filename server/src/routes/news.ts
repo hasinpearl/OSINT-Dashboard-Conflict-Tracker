@@ -5,6 +5,7 @@ import { getConflictConfig, readConflict } from "../conflicts";
 import { extractStructured } from "../agents";
 import { envKey } from "../env";
 import { readForceRefresh, readJsonBody } from "../request";
+import { AppError } from "../errors";
 
 const CACHE_KEY_BASE = "firecrawl-news";
 const PANEL = "news-feed";
@@ -23,7 +24,7 @@ export async function newsRoute(c: Context) {
 
   const firecrawlKey = envKey("FIRECRAWL_API_KEY");
   if (!firecrawlKey) {
-    return c.json({ error: "Service unavailable" }, 500);
+    throw new AppError("firecrawl_error");
   }
 
   const sourcesToScrape = config.newsSources.slice(0, 4);

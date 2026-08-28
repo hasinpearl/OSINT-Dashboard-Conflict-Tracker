@@ -4,6 +4,7 @@ import { logCacheHit } from "../costs";
 import { CONFLICT_CONFIG, getConflictConfig, readConflict, type ConflictConfig } from "../conflicts";
 import { searchStructured } from "../agents";
 import { readForceRefresh, readJsonBody } from "../request";
+import { AppError } from "../errors";
 
 const CACHE_KEY_BASE = "bias-tracker";
 const PANEL = "bias-tracker";
@@ -162,7 +163,7 @@ export async function biasTrackerRoute(c: Context) {
       .filter((x): x is NonNullable<typeof x> => x !== null);
 
     if (conflicts.length === 0) {
-      return c.json({ error: "Upstream analysis failed" }, 502);
+      throw new AppError("ai_gateway_error");
     }
 
     const response: AllResponse = {
@@ -177,7 +178,7 @@ export async function biasTrackerRoute(c: Context) {
 
   const single = await analyzeOne(config);
   if (!single) {
-    return c.json({ error: "Upstream analysis failed" }, 502);
+    throw new AppError("ai_gateway_error");
   }
 
   const response: SingleResponse = {

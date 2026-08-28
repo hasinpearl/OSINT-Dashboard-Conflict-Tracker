@@ -12,13 +12,11 @@ import { newsRoute } from "./routes/news";
 import { osintRoute } from "./routes/osint";
 import { telegramRoute } from "./routes/telegram";
 import { translateRoute } from "./routes/translate";
+import { enhancedOnError } from "./errors";
 
 const app = new Hono();
 
-app.onError((err, c) => {
-  console.error(`Unhandled error on ${c.req.path}:`, err);
-  return c.json({ error: "Internal error" }, 500);
-});
+app.onError(enhancedOnError);
 
 app.get("/api/health", healthRoute);
 

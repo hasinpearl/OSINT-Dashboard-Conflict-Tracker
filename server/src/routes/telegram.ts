@@ -5,6 +5,7 @@ import { getConflictConfig, readConflict } from "../conflicts";
 import { extractStructured } from "../agents";
 import { envKey } from "../env";
 import { readForceRefresh, readJsonBody } from "../request";
+import { AppError } from "../errors";
 
 const CACHE_KEY_BASE = "telegram-feed";
 const PANEL = "telegram";
@@ -122,7 +123,7 @@ export async function telegramRoute(c: Context) {
   const firecrawlKey = envKey("FIRECRAWL_API_KEY");
 
   if (!firecrawlKey) {
-    return c.json({ messages: [] });
+    throw new AppError("firecrawl_error");
   }
 
   const batch1 = await Promise.all(CHANNELS.slice(0, 4).map((ch) => scrapeChannel(firecrawlKey, ch)));

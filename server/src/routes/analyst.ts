@@ -4,6 +4,7 @@ import { logCacheHit } from "../costs";
 import { getConflictConfig, readConflict, type Expert } from "../conflicts";
 import { searchStructured } from "../agents";
 import { readForceRefresh, readJsonBody } from "../request";
+import { AppError } from "../errors";
 
 const CACHE_KEY_BASE = "analyst-curated";
 const PANEL = "analyst";

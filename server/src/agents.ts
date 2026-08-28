@@ -1,5 +1,6 @@
 import { envKey } from "./env";
 import { logCost, PRICES } from "./costs";
+import { AppError } from "./errors";
 
 //TUNE: Control the AI model tier (mid = search, light = extraction)
 const MID_MODEL = envKey("OPENROUTER_MID_MODEL") || "perplexity/sonar-pro";
@@ -38,7 +39,7 @@ export async function callAgent(
   opts: { maxTokens?: number; temperature?: number } = {},
 ): Promise<string> {
   const key = envKey("AI_GATEWAY_KEY");
-  if (!key) throw new Error("AI_GATEWAY_KEY not configured");
+  if (!key) throw new AppError("gateway_not_configured");
 
   const model = modelFor(role);
   logCost({ panel, provider: "openrouter", model, costUsd: priceFor(role) });
@@ -62,9 +63,7 @@ export async function callAgent(
   if (!res.ok) {
     const errText = await res.text().catch(() => "");
     console.error(`OpenRouter error (${model}):`, res.status, errText.slice(0, 500));
-    const err = new Error(`OpenRouter API error: ${res.status}`);
-    (err as any).status = res.status;
-    throw err;
+    throw new AppError("ai_gateway_error", `status ${res.status}`);
   }
 
   const data: any = await res.json();

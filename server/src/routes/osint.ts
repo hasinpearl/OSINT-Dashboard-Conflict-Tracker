@@ -5,6 +5,7 @@ import { getConflictConfig, readConflict } from "../conflicts";
 import { envKey } from "../env";
 import { readForceRefresh, readJsonBody } from "../request";
 import { collectionAgeMs, getRecentItems, markCollected, storeItems } from "../timeline";
+import { AppError } from "../errors";
 
 const PANEL = "osint";
 //TUNE: Control how long a collection pass stays fresh before re-collecting
@@ -58,7 +59,7 @@ export async function osintRoute(c: Context) {
 
   if (!envKey("AI_GATEWAY_KEY")) {
     if (stored.length > 0) return c.json(toResponse(stored));
-    return c.json({ error: "Service unavailable" }, 500);
+    throw new AppError("gateway_not_configured");
   }
 
   let parsed: { items?: RawOsintItem[] };
