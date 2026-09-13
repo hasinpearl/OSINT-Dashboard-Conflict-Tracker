@@ -86,6 +86,11 @@ CREATE TABLE IF NOT EXISTS items (
   UNIQUE (source, external_id)
 );
 
+ALTER TABLE items ADD COLUMN IF NOT EXISTS location_precision text;
+ALTER TABLE items ADD COLUMN IF NOT EXISTS location_confidence real;
+ALTER TABLE items ADD COLUMN IF NOT EXISTS geocoded_at timestamptz;
+ALTER TABLE items ADD COLUMN IF NOT EXISTS geocode_version smallint;
+
 CREATE INDEX IF NOT EXISTS items_published_at_idx ON items (published_at DESC NULLS LAST);
 CREATE INDEX IF NOT EXISTS items_conflict_panel_idx ON items (conflict, panel);
 CREATE INDEX IF NOT EXISTS items_story_id_idx ON items (story_id);
@@ -109,6 +114,15 @@ CREATE INDEX IF NOT EXISTS items_breaking_idx
 CREATE INDEX IF NOT EXISTS items_enrichment_version_idx
   ON items (((enrichment->>'version')::int))
   WHERE noise = false;
+
+-- The geocoder walks rows it has never attempted, newest first. The partial
+-- index keeps that scan off the full table once items grows.
+CREATE INDEX IF NOT EXISTS items_geocode_pending_idx
+  ON items (published_at DESC NULLS LAST, id DESC)
+  WHERE geocoded_at IS NULL;
+CREATE INDEX IF NOT EXISTS items_pins_idx
+  ON items (published_at DESC NULLS LAST)
+  WHERE primary_location IS NOT NULL AND noise = false;
 
 CREATE TABLE IF NOT EXISTS collection_runs (
   panel text NOT NULL,

@@ -52,6 +52,19 @@ const translations: Record<string, Record<Language, string>> = {
   "osint.subtitle": { en: "OPEN SOURCE INTEL", ar: "استخبارات مفتوحة المصدر" },
   "osint.offline": { en: "FEED OFFLINE", ar: "التغذية غير متصلة" },
 
+  "map.title": { en: "Event Map", ar: "خريطة الأحداث" },
+  "map.subtitle": { en: "GEOLOCATED", ar: "محدد الموقع" },
+  "map.pins": { en: "pins", ar: "علامة" },
+  "map.offline": { en: "PINS OFFLINE", ar: "العلامات غير متصلة" },
+  "map.exact": { en: "exact", ar: "دقيق" },
+  "map.approximate": { en: "approximate", ar: "تقريبي" },
+  "map.confidence": { en: "confidence", ar: "الثقة" },
+  "map.unconfigured": { en: "Map not configured", ar: "الخريطة غير مهيأة" },
+  "map.unconfiguredHint": {
+    en: "Add the Mapbox style and token to your private .env to enable the map.",
+    ar: "أضف نمط ورمز ماببوكس إلى ملف .env الخاص لتشغيل الخريطة.",
+  },
+
   "analyst.title": { en: "Analyst Commentary", ar: "تعليقات المحللين" },
   "analyst.subtitle": { en: "EXPERT ANALYSIS", ar: "تحليل الخبراء" },
   "analyst.offline": { en: "FEED OFFLINE", ar: "التغذية غير متصلة" },

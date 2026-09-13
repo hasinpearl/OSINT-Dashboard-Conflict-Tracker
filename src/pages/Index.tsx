@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, lazy, Suspense } from "react";
 import { Github } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { resetForced } from "@/lib/freshness";
@@ -13,6 +13,12 @@ import { OsintPanel } from "@/components/dashboard/OsintPanel";
 import { AnalystPanel } from "@/components/dashboard/AnalystPanel";
 import { ConflictFilter } from "@/components/dashboard/ConflictFilter";
 import { useLanguage } from "@/i18n/LanguageContext";
+import { Skeleton } from "@/components/ui/skeleton";
+
+//TUNE: Control the (map bundle). Mapbox GL is a large chunk, so the map loads after the dashboard paints rather than blocking it.
+const MapView = lazy(() =>
+  import("@/components/dashboard/MapView").then((m) => ({ default: m.MapView })),
+);
 
 const Index = () => {
   const [isLoading, setIsLoading] = useState(false);
@@ -68,8 +74,13 @@ const Index = () => {
               <OsintPanel />
             </div>
             {/* Row 3 */}
-            <div className="lg:col-span-3">
+            <div className="lg:col-span-2">
               <LiveCoverage />
+            </div>
+            <div className="lg:col-span-1">
+              <Suspense fallback={<Skeleton className="h-full w-full" />}>
+                <MapView />
+              </Suspense>
             </div>
             {/* Row 4 */}
             <div className="lg:col-span-3">

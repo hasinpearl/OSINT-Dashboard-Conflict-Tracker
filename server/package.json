@@ -10,6 +10,8 @@
     "workers:start": "tsx src/workers/index.ts",
     "enrich": "tsx src/workers/enrich-cli.ts",
     "enrich:all": "tsx src/workers/enrich-cli.ts --all",
+    "geocode": "tsx src/workers/geocode-cli.ts",
+    "geocode:audit": "tsx src/workers/geocode-audit-cli.ts",
     "migrate": "tsx src/workers/migrate-cli.ts"
   },
   "dependencies": {

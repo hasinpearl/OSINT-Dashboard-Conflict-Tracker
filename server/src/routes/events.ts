@@ -142,6 +142,8 @@ export async function eventsPinsRoute(c: Context) {
       url as source_url,
       content as original_text,
       published_at,
+      severity,
+      event_type,
       primary_location
     FROM items
     WHERE primary_location IS NOT NULL
