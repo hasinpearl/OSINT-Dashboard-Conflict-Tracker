@@ -1,55 +1,41 @@
 import type { Context } from "hono";
 import { FORCE_MIN_AGE_MS, getCached, setCache } from "../cache";
 import { logCacheHit } from "../costs";
-import { getConflictConfig, readConflict, type Expert } from "../conflicts";
-import { searchStructured } from "../agents";
+import { getConflictConfig, readConflict } from "../conflicts";
 import { readForceRefresh, readJsonBody } from "../request";
 import { AppError } from "../errors";
-import { extractArticle } from "../extractor";
+import {
+  deriveSummary,
+  eventTopic,
+  fetchItems,
+  isoOrNull,
+  outletName,
+  type ServingRow,
+} from "../serving";
 
 const CACHE_KEY_BASE = "analyst-curated";
 const PANEL = "analyst";
 
-interface AnalystComment {
-  analyst: string;
-  affiliation: string;
-  comment: string;
-  topic: string;
-  timestamp: string;
-  url?: string;
-}
+//TUNE: Control the (analyst panel size). Attributed pieces returned per panel load.
+const MAX_COMMENTS = 9;
 
-function normName(s: string): string {
-  return s
-    .toLowerCase()
-    .normalize("NFKD")
-    .replace(/[^a-z\s]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
+//TUNE: Control the (analyst candidate pool). Rows scanned before picking one piece per byline.
+const CANDIDATE_LIMIT = 200;
 
-function rosterSection(experts: Expert[], kind: Expert["kind"], heading: string): string {
-  const rows = experts
-    .filter((e) => e.kind === kind)
-    .map((e) => `- ${e.name} (${e.title})`)
-    .join("\n");
-  return `${heading}:\n${rows}`;
-}
+//TUNE: Control the (analyst cache ttl). How long a served page stays reusable before the DB is read again.
+const CACHE_TTL_MS = 10 * 60 * 1000;
 
-function filterToRoster(comments: AnalystComment[], experts: Expert[]): AnalystComment[] {
-  const allowed = experts.map((e) => ({ ...e, norm: normName(e.name) }));
-  const kept: AnalystComment[] = [];
-  for (const cmt of comments) {
-    const n = normName(String(cmt?.analyst ?? ""));
-    if (!n) continue;
-    const match = allowed.find((a) => n.includes(a.norm) || a.norm.includes(n));
-    if (!match) {
-      console.log(`analyst-curated: dropping off-roster commentator "${cmt.analyst}"`);
-      continue;
-    }
-    kept.push({ ...cmt, analyst: match.name, affiliation: match.title });
+// The panel shows who is saying what. Nothing in items carries a quote, so the
+// attribution is the real byline on the stored piece: the author when the feed
+// supplied one, otherwise the publishing outlet. No roster name is ever
+// attached to text that person did not write.
+function attribution(row: ServingRow): { analyst: string; affiliation: string } {
+  const outlet = outletName(row);
+  const author = (row.author ?? "").replace(/\s+/g, " ").trim();
+  if (author && author.toLowerCase() !== outlet.toLowerCase()) {
+    return { analyst: author, affiliation: outlet };
   }
-  return kept;
+  return { analyst: outlet, affiliation: row.source === "telegram" ? "Telegram channel" : "Newsroom" };
 }
 
 export async function analystRoute(c: Context) {
@@ -58,65 +44,67 @@ export async function analystRoute(c: Context) {
   const config = getConflictConfig(readConflict(body));
   const CACHE_KEY = `${CACHE_KEY_BASE}:${config.key}`;
 
-  const cached = await getCached(CACHE_KEY, forceRefresh ? FORCE_MIN_AGE_MS : undefined);
+  const cached = await getCached(CACHE_KEY, forceRefresh ? FORCE_MIN_AGE_MS : CACHE_TTL_MS);
   if (cached) {
-    logCacheHit(PANEL, "openrouter");
+    logCacheHit(PANEL, "database");
     return c.json(cached);
   }
 
-  const roster = `${rosterSection(config.experts, "official", "OFFICIALS")}\n\n${rosterSection(config.experts, "analyst", "EXPERT ANALYSTS")}`;
+  try {
+    // Off-domain and purely informational rows are not commentary on the
+    // conflict, so the panel takes the classified rows first and only widens
+    // when a conflict has nothing classified in store.
+    let rows = await fetchItems({
+      conflict: config.key,
+      limit: CANDIDATE_LIMIT,
+      excludeInformational: true,
+      requireText: true,
+      requireByline: true,
+    });
 
-  const parsed = await searchStructured<{ comments?: AnalystComment[] }>(
-    PANEL,
-    `You are a geopolitical research assistant focused on the ${config.label} conflict in ${config.region}. You report ONLY real, recent public statements from a fixed list of approved officials and analysts. Return ONLY valid JSON with no markdown.`,
-    `Find the most recent public statements and analysis about the ${config.label} conflict (key topics: ${config.searchTerms}) from the people below.
-
-${roster}
-
-STRICT RULES:
-- ONLY include people from the list above. Do not include anyone else, no matter how relevant their commentary seems.
-- Only include a person if you find a real, recent statement or analysis from them - prefer the past 2 weeks, at most 1 month old.
-- NEVER invent, embellish, or fabricate quotes. If you cannot find a real statement from someone, leave them out.
-- Use the person's affiliation EXACTLY as given in the list above.
-- Return each person's name EXACTLY as it is written in the list above.
-
-Return JSON: {"comments":[{"analyst":"name exactly as listed","affiliation":"affiliation exactly as listed","comment":"their key quote or analysis, 2-3 sentences","topic":"brief topic","url":"source url if available"}]}. Do not include a timestamp field. Include as many people from the list as you can find real recent statements for.`,
-    { comments: [] },
-  ).catch((e) => {
-    console.error("OpenRouter error (analyst):", e instanceof Error ? e.message : e);
-    return { comments: [] };
-  });
-
-  // Map to store real timestamps from source metadata
-  const timestampMap: Record<string, string | null> = {};
-
-  const comments = Array.isArray(parsed?.comments) ? parsed.comments : [];
-
-  // Collect real timestamps from source metadata
-  const timestampPromises = comments.map(async (comment) => {
-    if (comment.url) {
-      try {
-        const article = await extractArticle(comment.url);
-        timestampMap[comment.url] = article.publishedAt || null;
-      } catch (e) {
-        console.error(`Failed to extract timestamp for ${comment.url}:`, e);
-        timestampMap[comment.url] = null;
-      }
+    if (rows.length === 0) {
+      rows = await fetchItems({
+        conflict: config.key,
+        limit: CANDIDATE_LIMIT,
+        requireText: true,
+        requireByline: true,
+      });
     }
-  });
 
-  await Promise.all(timestampPromises);
+    // One entry per voice, so a prolific byline cannot fill the whole panel.
+    const seen = new Set<string>();
+    const comments: Array<{
+      analyst: string;
+      affiliation: string;
+      comment: string;
+      topic: string;
+      timestamp: string | null;
+      url?: string;
+    }> = [];
 
-  const filteredComments = filterToRoster(comments, config.experts).map((comment) => ({
-    ...comment,
-    timestamp: timestampMap[comment.url!] || undefined,
-  }));
+    for (const row of rows) {
+      if (comments.length >= MAX_COMMENTS) break;
+      const { analyst, affiliation } = attribution(row);
+      const key = analyst.toLowerCase();
+      if (seen.has(key)) continue;
+      const comment = deriveSummary(row);
+      if (!comment) continue;
+      seen.add(key);
+      comments.push({
+        analyst,
+        affiliation,
+        comment,
+        topic: eventTopic(row),
+        timestamp: isoOrNull(row.published_at),
+        url: row.url ?? undefined,
+      });
+    }
 
-  const filtered = {
-    comments: filteredComments,
-  };
-
-  await setCache(CACHE_KEY, filtered);
-
-  return c.json(filtered);
+    const result = { comments };
+    await setCache(CACHE_KEY, result);
+    return c.json(result);
+  } catch (e) {
+    console.error("analyst read failed:", e instanceof Error ? e.message : e);
+    throw new AppError("internal_error", "Failed to read analyst commentary");
+  }
 }

@@ -1,171 +1,161 @@
 import type { Context } from "hono";
-import { extractStructured } from "../agents";
+import { FORCE_MIN_AGE_MS, getCached, setCache } from "../cache";
 import { logCacheHit } from "../costs";
 import { getConflictConfig, readConflict } from "../conflicts";
 import { envKey } from "../env";
 import { readForceRefresh, readJsonBody } from "../request";
-import {
-  collectionAgeMs,
-  getTimeline,
-  markCollected,
-  storeItems,
-  toDateOnly,
-  upsertTimelineEvents,
-  type TimelineEvent,
-} from "../timeline";
 import { AppError } from "../errors";
+import {
+  deriveSummary,
+  deriveTitle,
+  fetchItems,
+  isoOrNull,
+  legacySeverity,
+  outletName,
+  type ServingRow,
+} from "../serving";
 
+const CACHE_KEY_BASE = "ai-summarize";
 const PANEL = "hot-topics";
 
-//TUNE: Control how long a collection pass stays fresh before re-collecting
-const COLLECT_TTL_MS = 60 * 60 * 1000;
-//TUNE: Control the min age a force refresh will accept before re-collecting
-const FORCE_MIN_COLLECT_AGE_MS = 5 * 60 * 1000;
-//TUNE: Control how many timeline events are returned per response
+//TUNE: Control the (timeline size). TIMELINE_MAX_EVENTS=topics returned per response.
 const MAX_EVENTS = Number(envKey("TIMELINE_MAX_EVENTS") || 40);
 
-interface RawTopic {
-  title?: string;
-  summary?: string;
-  severity?: string;
-  source?: string;
+//TUNE: Control the (timeline candidate pool). Rows scanned before clustering down to MAX_EVENTS.
+const CANDIDATE_LIMIT = 300;
+
+//TUNE: Control the (timeline cache ttl). How long a served timeline stays reusable before the DB is read again.
+const CACHE_TTL_MS = 5 * 60 * 1000;
+
+//TUNE: Control the (topic merge threshold). Shared significant words before two reports count as one topic.
+const MERGE_MIN_SHARED_WORDS = 4;
+
+//TUNE: Control the (topic merge window). Hours apart two reports may still merge into one topic.
+const MERGE_WINDOW_HOURS = 36;
+
+const SEVERITY_RANK: Record<string, number> = {
+  info: 0,
+  verified: 1,
+  developing: 2,
+  high: 3,
+  critical: 4,
+};
+
+interface Cluster {
+  lead: ServingRow;
+  words: Set<string>;
+  sources: Set<string>;
+  mentions: number;
+  severity: string;
+  latest: Date | null;
 }
 
-import { extractArticle } from "../extractor";
+function significantWords(text: string): Set<string> {
+  const out = new Set<string>();
+  for (const word of text.toLowerCase().split(/[^\p{L}\p{N}]+/u)) {
+    if (word.length > 3) out.add(word);
+  }
+  return out;
+}
 
-function toResponse(events: TimelineEvent[]) {
-  return {
-    topics: events.map((e) => ({
-      title: e.title,
-      summary: e.summary,
-      severity: e.severity,
-      timestamp: e.event_date,
-      source: e.sources?.length ? e.sources.join(", ") : undefined,
-      first_seen_at: e.first_seen_at,
-      sighting_count: e.sighting_count,
-    })),
-  };
+function sharedCount(a: Set<string>, b: Set<string>): number {
+  let shared = 0;
+  for (const w of a) if (b.has(w)) shared++;
+  return shared;
+}
+
+function hoursApart(a: Date | null, b: Date | null): number {
+  if (!a || !b) return Number.POSITIVE_INFINITY;
+  return Math.abs(a.getTime() - b.getTime()) / 3_600_000;
+}
+
+// Rows arrive newest first, so the first row of a cluster is its lead and the
+// cluster timestamp stays the lead's own published_at.
+function cluster(rows: ServingRow[]): Cluster[] {
+  const clusters: Cluster[] = [];
+
+  for (const row of rows) {
+    const title = deriveTitle(row);
+    if (!title) continue;
+    const words = significantWords(title);
+    const severity = legacySeverity(row.severity);
+
+    const match = clusters.find(
+      (cl) =>
+        hoursApart(cl.latest, row.published_at) <= MERGE_WINDOW_HOURS &&
+        sharedCount(cl.words, words) >= MERGE_MIN_SHARED_WORDS,
+    );
+
+    if (match) {
+      match.mentions++;
+      match.sources.add(outletName(row));
+      if (SEVERITY_RANK[severity] > SEVERITY_RANK[match.severity]) {
+        match.severity = severity;
+      }
+      continue;
+    }
+
+    clusters.push({
+      lead: row,
+      words,
+      sources: new Set([outletName(row)]),
+      mentions: 1,
+      severity,
+      latest: row.published_at,
+    });
+  }
+
+  return clusters;
 }
 
 export async function hotTopicsRoute(c: Context) {
   const body = await readJsonBody(c);
   const forceRefresh = readForceRefresh(c, body);
   const config = getConflictConfig(readConflict(body));
-  const WAR_START_DATE = config.timelineStartDate;
+  const CACHE_KEY = `${CACHE_KEY_BASE}:${config.key}`;
 
-  const stored = await getTimeline(config.key, MAX_EVENTS);
-
-  const age = await collectionAgeMs(PANEL, config.key);
-  const threshold = forceRefresh ? FORCE_MIN_COLLECT_AGE_MS : COLLECT_TTL_MS;
-  if (age < threshold) {
-    logCacheHit(PANEL, "openrouter");
-    return c.json(toResponse(stored));
+  const cached = await getCached(CACHE_KEY, forceRefresh ? FORCE_MIN_AGE_MS : CACHE_TTL_MS);
+  if (cached) {
+    logCacheHit(PANEL, "database");
+    return c.json(cached);
   }
 
-  const firecrawlKey = envKey("FIRECRAWL_API_KEY");
-  const gatewayKey = envKey("AI_GATEWAY_KEY");
-  if (!gatewayKey) {
-    if (stored.length > 0) return c.json(toResponse(stored));
-    throw new AppError("ai_gateway_key_missing");
-  }
-
-  const today = new Date().toISOString().split("T")[0];
-
-  const sourcesToScrape = config.newsSources.slice(0, 4);
-  const scrapeResults = await Promise.all(
-    sourcesToScrape.map(async (sourceUrl) => {
-      try {
-        const article = await extractArticle(sourceUrl);
-        return { url: sourceUrl, markdown: article.content ? `TITLE: ${article.title}\nTIMESTAMP: ${article.publishedAt || "NULL"}\n${article.content}` : "" };
-      } catch (e) {
-        console.error(`Error extracting article from ${sourceUrl}:`, e);
-        return { url: sourceUrl, markdown: "" };
-      }
-    }),
-  );
-
-  const scrapedContent = scrapeResults
-    .filter((r) => r.markdown)
-    .map((r) => `=== ${r.url} ===\n${r.markdown}`)
-    .join("\n\n");
-
-  if (!scrapedContent) {
-    console.error("All Firecrawl scrapes returned empty content, timeline unchanged");
-    return c.json(toResponse(stored));
-  }
-
-  const userPrompt = `You are a timeline editor. From the following scraped news content, extract ONLY major developments in the ${config.label} conflict (key topics: ${config.searchTerms}) that occurred between ${WAR_START_DATE} and today (${today}).
-
-STRICT RULES:
-- ONLY use events explicitly mentioned in the scraped content below. Do NOT add events from your own knowledge.
-- Each event MUST have a date that appears in the scraped text. If no date is visible, skip it.
-- Each event MUST be relevant to the ${config.label} conflict. Skip unrelated stories.
-- NO duplicates - if two sources mention the same event, merge them into one entry.
-- Order from OLDEST to NEWEST.
-- Maximum 15 entries.
-- severity: critical (war-changing), high (major military/diplomatic), developing (significant but evolving)
-
-Return ONLY this JSON:
-{"topics":[{"title":"short title max 8 words","summary":"1-2 sentences with key facts","severity":"critical|high|developing","source":"which outlet reported this"}]}
-
-SCRAPED CONTENT:
-${scrapedContent}`;
-
-  let parsed: { topics?: RawTopic[] };
   try {
-    parsed = await extractStructured<{ topics: RawTopic[] }>(
-      PANEL,
-      `You are a strict timeline editor for the ${config.label} conflict. You ONLY use facts from the provided scraped text. You NEVER add events from memory. Today is ${today}. Return ONLY valid JSON, no markdown.`,
-      userPrompt,
-      { topics: [] },
-      { maxTokens: 3000 },
-    );
+    // A timeline is the significant developments, not the whole feed, so
+    // off-domain and purely informational rows are left out.
+    let rows = await fetchItems({
+      conflict: config.key,
+      limit: CANDIDATE_LIMIT,
+      excludeInformational: true,
+      requireText: true,
+    });
+
+    // A quiet window in a single conflict can hold nothing but informational
+    // rows. Showing the plain feed beats showing an empty timeline.
+    if (rows.length === 0) {
+      rows = await fetchItems({
+        conflict: config.key,
+        limit: CANDIDATE_LIMIT,
+        requireText: true,
+      });
+    }
+
+    const topics = cluster(rows)
+      .slice(0, MAX_EVENTS)
+      .map((cl) => ({
+        title: deriveTitle(cl.lead),
+        summary: deriveSummary(cl.lead),
+        severity: cl.severity,
+        mentions: cl.mentions,
+        source: Array.from(cl.sources).slice(0, 3).join(", "),
+        timestamp: isoOrNull(cl.lead.published_at),
+      }));
+
+    const result = { topics };
+    await setCache(CACHE_KEY, result);
+    return c.json(result);
   } catch (e) {
-    console.error("hot-topics: timeline extraction failed:", e);
-    return c.json(toResponse(stored));
+    console.error("ai-summarize read failed:", e instanceof Error ? e.message : e);
+    throw new AppError("internal_error", "Failed to read the timeline");
   }
-
-  const warStart = new Date(WAR_START_DATE).getTime();
-  const todayMs = new Date(today + "T23:59:59Z").getTime();
-
-  const inRange = (parsed.topics || []).filter((t) => {
-    if (!t || !t.title) return false;
-    return true;
-  });
-
-  const { inserted, merged } = await upsertTimelineEvents(
-    config.key,
-    inRange.map((t) => ({
-      conflict: config.key,
-      title: String(t.title),
-      summary: String(t.summary ?? ""),
-      severity: t.severity,
-      eventDate: new Date().toISOString(), // Using current date as we no longer have model-generated timestamps
-      source: t.source ? String(t.source) : undefined,
-    })),
-  );
-
-  await storeItems(
-    inRange.map((t) => ({
-      source: String(t.source || "news"),
-      externalId: `hot-topics|${config.key}|${new Date().toISOString().split("T")[0]}|${String(
-        t.title,
-      ).slice(0, 120)}`,
-      conflict: config.key,
-      panel: PANEL,
-      title: String(t.title),
-      content: `${t.title}\n\n${t.summary ?? ""}`,
-      severity: t.severity,
-      publishedAt: new Date().toISOString(), // Using current date as we no longer have model-generated timestamps
-      raw: { collected_by: "hot-topics" },
-    })),
-  );
-
-  await markCollected(PANEL, config.key);
-  console.log(
-    `hot-topics(${config.key}): ${inRange.length} extracted, ${inserted} new, ${merged} merged`,
-  );
-
-  const refreshed = await getTimeline(config.key, MAX_EVENTS);
-  return c.json(toResponse(refreshed.length > 0 ? refreshed : stored));
 }

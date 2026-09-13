@@ -1,28 +1,19 @@
 import type { Context } from "hono";
-import { deleteCacheKeys, FORCE_MIN_AGE_MS, getCached, setCache } from "../cache";
-import { logCost, logCacheHit, PRICES } from "../costs";
+import { FORCE_MIN_AGE_MS, getCached, setCache } from "../cache";
+import { logCacheHit } from "../costs";
 import { getConflictConfig, readConflict } from "../conflicts";
-import { extractStructured } from "../agents";
-import { envKey } from "../env";
 import { readForceRefresh, readJsonBody } from "../request";
 import { AppError } from "../errors";
-import { pool } from "../db";
+import { deriveSummary, fetchItems, isoOrNull, telegramMessageId } from "../serving";
 
 const CACHE_KEY_BASE = "telegram-feed";
 const PANEL = "telegram";
-//TUNE: Control max age of the newest cached post before forcing a re-scrape
-const MAX_NEWEST_POST_AGE_MS = 2 * 60 * 60 * 1000;
 
-async function clearAllTelegramCache(): Promise<void> {
-  const keys = [
-    `${CACHE_KEY_BASE}:all`,
-    `${CACHE_KEY_BASE}:iran-us`,
-    `${CACHE_KEY_BASE}:ukraine-russia`,
-    `${CACHE_KEY_BASE}:china-taiwan`,
-  ];
-  await deleteCacheKeys(keys);
-  console.log(`Cleared all telegram-feed cache rows (${keys.join(", ")})`);
-}
+//TUNE: Control the (telegram panel size). Messages returned per panel load.
+const MAX_MESSAGES = 40;
+
+//TUNE: Control the (telegram cache ttl). How long a served page stays reusable before the DB is read again.
+const CACHE_TTL_MS = 2 * 60 * 1000;
 
 export async function telegramRoute(c: Context) {
   const body = await readJsonBody(c);
@@ -30,46 +21,33 @@ export async function telegramRoute(c: Context) {
   const config = getConflictConfig(readConflict(body));
   const CACHE_KEY = `${CACHE_KEY_BASE}:${config.key}`;
 
-  // Try to get data from cache first
-  const cached = await getCached(CACHE_KEY, forceRefresh ? FORCE_MIN_AGE_MS : undefined);
+  const cached = await getCached(CACHE_KEY, forceRefresh ? FORCE_MIN_AGE_MS : CACHE_TTL_MS);
   if (cached) {
     logCacheHit(PANEL, "database");
     return c.json(cached);
   }
 
-  // If not in cache, fetch from database
   try {
-    // Fetch recent Telegram messages from database
-    const result = await pool.query(
-      `SELECT 
-         id,
-         source_uid,
-         url,
-         content,
-         author,
-         published_at as timestamp,
-         raw
-       FROM items 
-       WHERE source = 'telegram' 
-         AND published_at >= NOW() - INTERVAL '2 hours'
-       ORDER BY published_at DESC 
-       LIMIT 20`
-    );
+    const rows = await fetchItems({
+      conflict: config.key,
+      source: "telegram",
+      limit: MAX_MESSAGES,
+      requireText: true,
+    });
 
-    const messages = result.rows.map(row => ({
-      channel: row.source_uid,
-      text: row.content,
-      timestamp: row.timestamp.toISOString(),
-      message_id: row.id,
-      url: row.url
+    const messages = rows.map((row) => ({
+      channel: row.source_uid ?? row.source,
+      text: deriveSummary(row),
+      timestamp: isoOrNull(row.published_at),
+      message_id: telegramMessageId(row),
+      url: row.url ?? undefined,
     }));
 
-    const resultData = { messages };
-    await setCache(CACHE_KEY, resultData);
-
-    return c.json(resultData);
+    const result = { messages };
+    await setCache(CACHE_KEY, result);
+    return c.json(result);
   } catch (e) {
-    console.error("Error fetching Telegram messages from database:", e);
-    throw new AppError("internal_error", "Failed to fetch Telegram messages");
+    console.error("telegram-feed read failed:", e instanceof Error ? e.message : e);
+    throw new AppError("internal_error", "Failed to read Telegram messages");
   }
 }

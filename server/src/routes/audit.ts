@@ -2,15 +2,16 @@ import type { Context } from "hono";
 import { deleteCacheKeys, getCacheRows } from "../cache";
 import { pool } from "../db";
 
-// analyst-curated replaced perplexity-analyst. osint moved off api_cache
-// entirely (see routes/osint.ts, now backed by the items table), so neither
-// old base belongs here.
+// Every panel now serves from the items table and uses api_cache only as a
+// read-through layer, so all seven panel keys belong here. A name not on this
+// list is an orphan the cleanup pass can drop.
 const KNOWN_FUNCTIONS = [
   "firecrawl-news",
   "analyst-curated",
   "telegram-feed",
   "ai-summarize",
   "bias-tracker",
+  "osint",
 ];
 const CONFLICT_SUFFIXES = ["all", "iran-us", "ukraine-russia", "china-taiwan"];
 

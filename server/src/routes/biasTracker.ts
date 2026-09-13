@@ -1,15 +1,31 @@
 import type { Context } from "hono";
-import { deleteCacheKeys, FORCE_MIN_AGE_MS, getCached, setCache } from "../cache";
+import { FORCE_MIN_AGE_MS, getCached, setCache } from "../cache";
 import { logCacheHit } from "../costs";
 import { CONFLICT_CONFIG, getConflictConfig, readConflict, type ConflictConfig } from "../conflicts";
-import { searchStructured } from "../agents";
 import { readForceRefresh, readJsonBody } from "../request";
 import { AppError } from "../errors";
+import {
+  deriveTitle,
+  fetchItems,
+  isoOrNull,
+  publisherBloc,
+  type ServingRow,
+} from "../serving";
 
 const CACHE_KEY_BASE = "bias-tracker";
 const PANEL = "bias-tracker";
-//TUNE: Control how long a bias result stays fresh before re-analyzing
+
+//TUNE: Control the (bias cache ttl). How long a computed spectrum stays reusable before the DB is read again.
 const CACHE_TTL_MS = 12 * 60 * 60 * 1000;
+
+//TUNE: Control the (bias force ttl). Min age a force refresh will accept before recomputing.
+const FORCE_TTL_MS = 5 * 60 * 1000;
+
+//TUNE: Control the (bias sample size). Rows counted per conflict when computing the spectrum.
+const SAMPLE_LIMIT = 500;
+
+//TUNE: Control the (bias window). Hours of coverage the spectrum is computed over.
+const WINDOW_HOURS = 7 * 24;
 
 interface BiasData {
   total_stories: number;
@@ -23,6 +39,7 @@ interface BiasData {
   top_left_story: string;
   top_center_story: string;
   top_right_story: string;
+  last_updated: string | null;
   left_label: string;
   center_label: string;
   right_label: string;
@@ -37,153 +54,137 @@ interface SingleResponse extends BiasData {
 interface AllResponse {
   mode: "all";
   conflicts: Array<BiasData & { conflict: string; label: string }>;
+  last_updated: string | null;
 }
 
-const num = (v: unknown, d = 0): number => {
-  const n = typeof v === "number" ? v : Number(v);
-  return Number.isFinite(n) ? n : d;
-};
-const str = (v: unknown, d = ""): string => (typeof v === "string" ? v : d);
-
-const LIMITATION_PHRASES = /only found|couldn'?t find|limited results|not enough|fewer than|unable to (find|retrieve|locate)|no (search )?results|could not find/i;
-
-function cleanSummary(summary: string): string {
-  if (!summary || !LIMITATION_PHRASES.test(summary)) return summary;
-  const cleaned = summary
-    .split(/(?<=[.!?])\s+/)
-    .filter((s) => !LIMITATION_PHRASES.test(s))
-    .join(" ")
-    .trim();
-  return cleaned.length > 20 ? cleaned : summary;
+function pct(part: number, total: number): number {
+  if (total === 0) return 0;
+  return Math.round((part / total) * 1000) / 10;
 }
 
-async function analyzeOne(config: ConflictConfig): Promise<BiasData | null> {
-  const userPrompt = `Analyze up to 20 news stories about the ${config.label} conflict (key topics: ${config.searchTerms}) from the past 7 days. If fewer than 20 stories are available, analyze however many you find - even 5-6 stories is enough for a meaningful bias breakdown. Base your percentages on whatever stories are available. Do NOT mention that you couldn't find 20 stories. Do NOT include meta-commentary about the search results or limitations. Just provide the analysis based on what is available.
+// The summary states what the counts show. It reports the measurement, it does
+// not editorialise beyond it.
+function describe(config: ConflictConfig, buckets: Record<string, ServingRow[]>, total: number): string {
+  const windowDays = Math.round(WINDOW_HOURS / 24);
+  if (total === 0) {
+    return `No stored coverage of ${config.label} in the last ${windowDays} days, so there is no spectrum to report.`;
+  }
+  const ranked = (
+    [
+      ["left", config.biasLeftLabel],
+      ["center", config.biasCenterLabel],
+      ["right", config.biasRightLabel],
+    ] as const
+  )
+    .map(([key, label]) => ({ label, count: buckets[key].length }))
+    .sort((a, b) => b.count - a.count);
 
-Search for coverage across ALL of these source categories:
-- Western outlets: Reuters, BBC, CNN, Fox News, NYT, Washington Post, AP, Bloomberg, Sky News
-- Russian/Eastern European outlets: RT, TASS, Sputnik, Interfax
-- Chinese/East Asian outlets: Xinhua, Global Times, CGTN, South China Morning Post
-- Iranian outlets: Press TV, IRNA, Tehran Times, Mehr News, Tasnim News
-- Middle Eastern/Gulf outlets: Al Jazeera, Al Arabiya, Al Mayadeen, TRT World, Middle East Eye, The National (UAE), Gulf News, Arab News
-- International/multilateral: France24, DW, NHK, ABC Australia
+  const lead = ranked[0];
+  const zero = ranked.filter((r) => r.count === 0).map((r) => r.label);
+  const parts = [
+    `${total} stories on ${config.label} in the last ${windowDays} days, counted by publisher bloc.`,
+    `${lead.label} outlets account for the largest share at ${pct(lead.count, total)}%.`,
+  ];
+  if (zero.length > 0) {
+    parts.push(`No coverage from ${zero.join(" or ")} outlets landed in this window.`);
+  }
+  return parts.join(" ");
+}
 
-You MUST include stories from non-Western sources in your analysis. If a story is only covered by one side, still count it. The goal is to capture the FULL global narrative spectrum, not just the Western perspective.
-
-Important: 0% for any category is almost never accurate in a real conflict. Even if one side dominates, there is always counter-narrative coverage. If your initial analysis produces 0% for any category, search harder for regional and non-Western sources and re-analyze before returning results.
-
-For each story, classify its NARRATIVE - not the outlet, but what the story itself supports:
-
-- LEFT (${config.biasLeftLabel} side): Stories that frame ${config.biasLeftLabel} actions as justified, defensive, or necessary. Stories critical of ${config.biasRightLabel}'s actions. Stories emphasizing aggression or threats from ${config.biasRightLabel}.
-
-- CENTER (${config.biasCenterLabel}): Stories from international bodies (UN, EU, regional blocs) calling for de-escalation. Stories presenting both sides equally. Humanitarian-focused coverage. Diplomatic coverage without taking sides.
-
-- RIGHT (${config.biasRightLabel} side): Stories that frame ${config.biasRightLabel}'s actions as defensive or justified. Stories critical of ${config.biasLeftLabel}'s actions, sanctions, or military presence. Stories emphasizing civilian casualties caused by ${config.biasLeftLabel}. Stories sympathetic to ${config.biasRightLabel}'s sovereignty arguments.
-
-Count how many stories fall into each category. Calculate the percentage for each.
-
-Return ONLY this JSON:
-
-{"total_stories":number,"left_count":number,"center_count":number,"right_count":number,"left_pct":number,"center_pct":number,"right_pct":number,"summary":"2-3 sentences explaining the current narrative landscape - what is dominating the conversation and which direction coverage is leaning","top_left_story":"headline of strongest ${config.biasLeftLabel}-sympathetic story","top_center_story":"headline of most neutral story","top_right_story":"headline of strongest ${config.biasRightLabel}-sympathetic story"}`;
-
-  const parsed = await searchStructured<Partial<BiasData>>(
-    PANEL,
-    "You are a media narrative analyst. Return ONLY valid JSON, no prose, no markdown fences. Timestamps must be ISO 8601 UTC.",
-    userPrompt,
-    {},
-    { maxTokens: 1500 },
-  ).catch((e) => {
-    console.error(`OpenRouter call failed for ${config.key}:`, e instanceof Error ? e.message : e);
-    return {} as Partial<BiasData>;
+// Counts real published coverage, not channel posts: the bloc of a Telegram
+// channel is not an editorial line the panel can defend. An empty window
+// returns a real zero reading rather than an error, so the panel can say there
+// was no coverage instead of claiming it is offline.
+async function analyzeOne(config: ConflictConfig): Promise<BiasData> {
+  const rows = await fetchItems({
+    conflict: config.key,
+    source: "rss",
+    limit: SAMPLE_LIMIT,
+    requireText: true,
+    sinceHours: WINDOW_HOURS,
   });
 
-  const result: BiasData = {
-    total_stories: num(parsed.total_stories, 20),
-    left_count: num(parsed.left_count),
-    center_count: num(parsed.center_count),
-    right_count: num(parsed.right_count),
-    left_pct: num(parsed.left_pct),
-    center_pct: num(parsed.center_pct),
-    right_pct: num(parsed.right_pct),
-    summary: cleanSummary(str(parsed.summary)),
-    top_left_story: str(parsed.top_left_story),
-    top_center_story: str(parsed.top_center_story),
-    top_right_story: str(parsed.top_right_story),
+  const buckets: Record<string, ServingRow[]> = { left: [], center: [], right: [] };
+  for (const row of rows) {
+    const bloc = publisherBloc(row.source_uid);
+    if (bloc === "west") buckets.left.push(row);
+    else if (bloc === "rival") buckets.right.push(row);
+    else buckets.center.push(row);
+  }
+
+  const total = rows.length;
+  const headline = (key: string): string => {
+    const row = buckets[key][0];
+    return row ? deriveTitle(row) : "";
+  };
+
+  // Rows come back newest first, so the first row carries the newest real
+  // published_at in the counted set.
+  return {
+    total_stories: total,
+    left_count: buckets.left.length,
+    center_count: buckets.center.length,
+    right_count: buckets.right.length,
+    left_pct: pct(buckets.left.length, total),
+    center_pct: pct(buckets.center.length, total),
+    right_pct: pct(buckets.right.length, total),
+    summary: describe(config, buckets, total),
+    top_left_story: headline("left"),
+    top_center_story: headline("center"),
+    top_right_story: headline("right"),
+    last_updated: total > 0 ? isoOrNull(rows[0].published_at) : null,
     left_label: config.biasLeftLabel,
     center_label: config.biasCenterLabel,
     right_label: config.biasRightLabel,
   };
-
-  const hasContent =
-    result.summary.length > 0 &&
-    result.left_count + result.center_count + result.right_count > 0;
-
-  if (!hasContent) {
-    console.warn(`bias-tracker (${config.key}): empty/invalid result. Raw parsed:`, JSON.stringify(parsed).slice(0, 500));
-    return null;
-  }
-
-  return result;
 }
 
 export async function biasTrackerRoute(c: Context) {
-  await deleteCacheKeys(["bias-tracker"]);
-
   const body = await readJsonBody(c);
   const forceRefresh = readForceRefresh(c, body);
   const config = getConflictConfig(readConflict(body));
   const CACHE_KEY = `${CACHE_KEY_BASE}:${config.key}`;
 
-  //TUNE: Control the min age a force refresh will accept before re-analyzing
-  const cached = await getCached(CACHE_KEY, forceRefresh ? 5 * 60 * 1000 : CACHE_TTL_MS);
+  const cached = await getCached(CACHE_KEY, forceRefresh ? FORCE_TTL_MS : CACHE_TTL_MS);
   if (cached) {
-    logCacheHit(PANEL, "openrouter");
+    logCacheHit(PANEL, "database");
     return c.json(cached);
   }
 
-  if (config.key === "all") {
-    const keys = ["iran-us", "ukraine-russia", "china-taiwan"] as const;
-    const results = await Promise.all(
-      keys.map((k) => analyzeOne(CONFLICT_CONFIG[k])),
-    );
+  try {
+    if (config.key === "all") {
+      const keys = ["iran-us", "ukraine-russia", "china-taiwan"] as const;
+      const results = await Promise.all(keys.map((k) => analyzeOne(CONFLICT_CONFIG[k])));
 
-    const conflicts = keys
-      .map((k, i) => {
-        const r = results[i];
-        if (!r) return null;
-        return {
-          conflict: k,
-          label: CONFLICT_CONFIG[k].label,
-          ...r,
-        };
-      })
-      .filter((x): x is NonNullable<typeof x> => x !== null);
+      const conflicts = keys.map((k, i) => ({
+        conflict: k,
+        label: CONFLICT_CONFIG[k].label,
+        ...results[i],
+      }));
 
-    if (conflicts.length === 0) {
-      throw new AppError("ai_gateway_error");
+      const newest = conflicts
+        .map((x) => x.last_updated)
+        .filter((t): t is string => Boolean(t))
+        .sort()
+        .pop() ?? null;
+
+      const response: AllResponse = { mode: "all", conflicts, last_updated: newest };
+      await setCache(CACHE_KEY, response);
+      return c.json(response);
     }
 
-    const response: AllResponse = {
-      mode: "all",
-      conflicts,
+    const response: SingleResponse = {
+      mode: "single",
+      conflict: config.key,
+      label: config.label,
+      ...(await analyzeOne(config)),
     };
 
     await setCache(CACHE_KEY, response);
     return c.json(response);
+  } catch (e) {
+    if (e instanceof AppError) throw e;
+    console.error("bias-tracker read failed:", e instanceof Error ? e.message : e);
+    throw new AppError("internal_error", "Failed to compute the coverage spectrum");
   }
-
-  const single = await analyzeOne(config);
-  if (!single) {
-    throw new AppError("ai_gateway_error");
-  }
-
-  const response: SingleResponse = {
-    mode: "single",
-    conflict: config.key,
-    label: config.label,
-    ...single,
-  };
-
-  await setCache(CACHE_KEY, response);
-  return c.json(response);
 }
