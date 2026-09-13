@@ -98,7 +98,7 @@ export async function eventsRoute(c: Context) {
   }
   
   // Order and limit
-  query += ` ORDER BY published_at DESC, id DESC LIMIT $${paramIndex++}`;
+  query += ` ORDER BY published_at DESC NULLS LAST, id DESC LIMIT $${paramIndex++}`;
   params.push(limitNum);
   
   try {
@@ -108,7 +108,7 @@ export async function eventsRoute(c: Context) {
     let nextCursor = null;
     if (result.rows.length > 0) {
       const lastRow = result.rows[result.rows.length - 1];
-      nextCursor = lastRow.published_at.toISOString();
+      nextCursor = lastRow.published_at ? lastRow.published_at.toISOString() : null;
     }
     
     return c.json({
@@ -158,7 +158,7 @@ export async function eventsPinsRoute(c: Context) {
   }
   
   // Order and limit
-  query += ` ORDER BY published_at DESC LIMIT $${paramIndex++}`;
+  query += ` ORDER BY published_at DESC NULLS LAST LIMIT $${paramIndex++}`;
   params.push(limitNum);
   
   try {
@@ -178,87 +178,114 @@ export async function eventsPinsRoute(c: Context) {
  * GET /api/stats
  * Fetch statistics about events
  */
+//TUNE: Control the (stats window cap). Largest `since` window in hours the stats route will accept.
+const STATS_MAX_WINDOW_HOURS = 24 * 90;
+
 export async function statsRoute(c: Context) {
+  const { since } = c.req.query();
+
+  // Unbounded aggregates have to touch every row by definition. Passing
+  // ?since=<hours> scopes them to the published_at index instead, which is the
+  // difference between a full pass and a few milliseconds once items grows.
+  let windowHours: number | null = null;
+  if (since) {
+    const parsed = Number(since);
+    if (Number.isFinite(parsed) && parsed > 0) {
+      windowHours = Math.min(parsed, STATS_MAX_WINDOW_HOURS);
+    }
+  }
+
+  const windowClause = windowHours
+    ? `AND published_at >= NOW() - ($1 || ' hours')::interval`
+    : "";
+  const windowParams = windowHours ? [String(windowHours)] : [];
+
   try {
-    // Total events
-    const totalResult = await pool.query("SELECT COUNT(*) as total FROM items WHERE noise = false");
-    const totalEvents = parseInt(totalResult.rows[0].total);
-    
-    // Events last hour
-    const hourResult = await pool.query(`
-      SELECT COUNT(*) as count FROM items 
-      WHERE published_at >= NOW() - INTERVAL '1 hour'
-        AND noise = false
-    `);
-    const eventsLastHour = parseInt(hourResult.rows[0].count);
-    
-    // Events per minute (last hour)
-    const minuteResult = await pool.query(`
-      SELECT COUNT(*) / 60.0 as avg_per_minute FROM items 
-      WHERE published_at >= NOW() - INTERVAL '1 hour'
-        AND noise = false
-    `);
-    const eventsPerMinute = parseFloat(minuteResult.rows[0].avg_per_minute) || 0;
-    
-    // Events by type
-    const typeResult = await pool.query(`
-      SELECT event_type, COUNT(*) as count 
-      FROM items 
-      WHERE event_type IS NOT NULL 
-        AND noise = false
-      GROUP BY event_type 
-      ORDER BY count DESC
-    `);
+    const [
+      scalarResult,
+      typeResult,
+      severityResult,
+      sourceResult,
+      regionResult,
+    ] = await Promise.all([
+      pool.query(
+        `SELECT
+           COUNT(*) AS total,
+           COUNT(*) FILTER (WHERE published_at >= NOW() - INTERVAL '1 hour') AS last_hour
+         FROM items
+         WHERE noise = false
+           ${windowClause}`,
+        windowParams,
+      ),
+      pool.query(
+        `SELECT event_type, COUNT(*) as count 
+         FROM items 
+         WHERE event_type IS NOT NULL 
+           AND noise = false
+           ${windowClause}
+         GROUP BY event_type 
+         ORDER BY count DESC`,
+        windowParams,
+      ),
+      pool.query(
+        `SELECT severity, COUNT(*) as count 
+         FROM items 
+         WHERE severity IS NOT NULL 
+           AND noise = false
+           ${windowClause}
+         GROUP BY severity 
+         ORDER BY count DESC`,
+        windowParams,
+      ),
+      pool.query(
+        `SELECT source, COUNT(*) as count 
+         FROM items 
+         WHERE source IS NOT NULL 
+           AND noise = false
+           ${windowClause}
+         GROUP BY source 
+         ORDER BY count DESC`,
+        windowParams,
+      ),
+      pool.query(
+        `SELECT primary_location->>'region' as region, COUNT(*) as count 
+         FROM items 
+         WHERE primary_location IS NOT NULL 
+           AND noise = false
+           ${windowClause}
+         GROUP BY primary_location->>'region' 
+         ORDER BY count DESC 
+         LIMIT 10`,
+        windowParams,
+      ),
+    ]);
+
+    const totalEvents = parseInt(scalarResult.rows[0].total);
+    const eventsLastHour = parseInt(scalarResult.rows[0].last_hour);
+    const eventsPerMinute = eventsLastHour / 60;
+
     const byType = typeResult.rows.reduce((acc, row) => {
       acc[row.event_type] = parseInt(row.count);
       return acc;
     }, {} as Record<string, number>);
-    
-    // Events by severity
-    const severityResult = await pool.query(`
-      SELECT severity, COUNT(*) as count 
-      FROM items 
-      WHERE severity IS NOT NULL 
-        AND noise = false
-      GROUP BY severity 
-      ORDER BY count DESC
-    `);
+
     const bySeverity = severityResult.rows.reduce((acc, row) => {
       acc[row.severity] = parseInt(row.count);
       return acc;
     }, {} as Record<string, number>);
-    
-    // Events by source
-    const sourceResult = await pool.query(`
-      SELECT source, COUNT(*) as count 
-      FROM items 
-      WHERE source IS NOT NULL 
-        AND noise = false
-      GROUP BY source 
-      ORDER BY count DESC
-    `);
+
     const bySource = sourceResult.rows.reduce((acc, row) => {
       acc[row.source] = parseInt(row.count);
       return acc;
     }, {} as Record<string, number>);
-    
-    // Top regions (primary_location)
-    const regionResult = await pool.query(`
-      SELECT primary_location->>'region' as region, COUNT(*) as count 
-      FROM items 
-      WHERE primary_location IS NOT NULL 
-        AND noise = false
-      GROUP BY primary_location->>'region' 
-      ORDER BY count DESC 
-      LIMIT 10
-    `);
+
     const topRegions = regionResult.rows.reduce((acc, row) => {
       if (row.region) {
         acc[row.region] = parseInt(row.count);
       }
       return acc;
     }, {} as Record<string, number>);
-    
+
     return c.json({
       total_events: totalEvents,
       events_last_hour: eventsLastHour,
@@ -266,7 +293,8 @@ export async function statsRoute(c: Context) {
       by_type: byType,
       by_severity: bySeverity,
       by_source: bySource,
-      top_regions: topRegions
+      top_regions: topRegions,
+      ...(windowHours ? { window_hours: windowHours } : {}),
     });
   } catch (error) {
     console.error("Error fetching stats:", error);

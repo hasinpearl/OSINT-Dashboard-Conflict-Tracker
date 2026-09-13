@@ -1,6 +1,7 @@
 import { runRssWorker } from "./rss";
 import { startTelegramWorker } from "./telegram";
 import { runTelegramPreviewWorker } from "./telegramPreview";
+import { runEnrichWorker } from "./enrich-loop";
 import { envKey } from "../env";
 import { initDb } from "../db";
 
@@ -9,7 +10,7 @@ async function main() {
   const tgApiId = envKey('TG_API_ID');
   
   // Start workers
-  const workers = [runRssWorker()];
+  const workers = [runRssWorker(), runEnrichWorker()];
   
   if (tgApiId) {
     // Run MTProto worker if API credentials are available

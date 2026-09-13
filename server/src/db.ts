@@ -94,6 +94,22 @@ CREATE INDEX IF NOT EXISTS items_content_fts_idx ON items
 CREATE INDEX IF NOT EXISTS items_event_type_idx ON items (event_type);
 CREATE INDEX IF NOT EXISTS items_source_idx ON items (source);
 
+-- Serving indexes. /api/events always filters noise = false and orders by
+-- published_at DESC, so the partial index is what keeps the feed off a seq scan.
+CREATE INDEX IF NOT EXISTS items_live_feed_idx
+  ON items (published_at DESC NULLS LAST, id DESC) WHERE noise = false;
+CREATE INDEX IF NOT EXISTS items_event_type_published_at_idx
+  ON items (event_type, published_at DESC NULLS LAST) WHERE noise = false;
+CREATE INDEX IF NOT EXISTS items_severity_published_at_idx
+  ON items (severity, published_at DESC NULLS LAST) WHERE noise = false;
+CREATE INDEX IF NOT EXISTS items_source_uid_published_at_idx
+  ON items (source_uid, published_at DESC NULLS LAST) WHERE noise = false;
+CREATE INDEX IF NOT EXISTS items_breaking_idx
+  ON items (published_at DESC NULLS LAST) WHERE is_breaking AND noise = false;
+CREATE INDEX IF NOT EXISTS items_enrichment_version_idx
+  ON items (((enrichment->>'version')::int))
+  WHERE noise = false;
+
 CREATE TABLE IF NOT EXISTS collection_runs (
   panel text NOT NULL,
   conflict text NOT NULL,

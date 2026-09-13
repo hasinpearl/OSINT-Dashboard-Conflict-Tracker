@@ -1,6 +1,7 @@
 import { envKey } from '../env';
 import { pool } from '../db';
 import { sourceStatusUpdate } from './source-status';
+import { classify } from '../enrich';
 import https from 'https';
 import { JSDOM } from 'jsdom';
 
@@ -43,6 +44,11 @@ async function insertTelegramMessage(message: {
     // Generate external ID
     const externalId = generateExternalId(message.channel, message.messageId);
     
+    const enriched = classify({
+      content: message.content,
+      publishedAt: message.eventTs,
+    });
+
     // Insert into database
     const result = await pool.query(
       `INSERT INTO items (
@@ -54,8 +60,13 @@ async function insertTelegramMessage(message: {
         published_at, 
         source_uid, 
         has_media, 
-        raw
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        raw,
+        event_type,
+        severity,
+        is_breaking,
+        lang,
+        enrichment
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
       ON CONFLICT (source, external_id) DO NOTHING
       RETURNING id`,
       [
@@ -67,7 +78,12 @@ async function insertTelegramMessage(message: {
         message.eventTs,
         message.channel,
         message.hasMedia,
-        message.raw
+        message.raw,
+        enriched.event_type,
+        enriched.severity,
+        enriched.is_breaking,
+        enriched.lang,
+        JSON.stringify(enriched.enrichment)
       ]
     );
     

@@ -5,6 +5,7 @@ import Parser from "rss-parser";
 import https from "https";
 import crypto from "crypto";
 import { Item, SourceStatus } from "../types";
+import { classify } from "../enrich";
 
 //TUNE: Control the (rss feeds). RSS_FEEDS=comma separated feed URLs polled every round.
 const RSS_FEEDS = envKey("RSS_FEEDS")?.split(",").map(f => f.trim()).filter(f => f) || [];
@@ -83,6 +84,12 @@ async function insertItem(item: {
   raw: any;
 }): Promise<boolean> {
   try {
+    const enriched = classify({
+      title: item.title,
+      content: item.content,
+      publishedAt: item.eventTs,
+    });
+
     const result = await pool.query(
       `INSERT INTO items (
         source, 
@@ -93,8 +100,13 @@ async function insertItem(item: {
         author, 
         published_at, 
         source_uid,
-        raw
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        raw,
+        event_type,
+        severity,
+        is_breaking,
+        lang,
+        enrichment
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
       ON CONFLICT (source, external_id) DO NOTHING
       RETURNING id`,
       [
@@ -106,7 +118,12 @@ async function insertItem(item: {
         item.author,
         item.eventTs,
         item.feedKey,
-        item.raw
+        item.raw,
+        enriched.event_type,
+        enriched.severity,
+        enriched.is_breaking,
+        enriched.lang,
+        JSON.stringify(enriched.enrichment)
       ]
     );
     

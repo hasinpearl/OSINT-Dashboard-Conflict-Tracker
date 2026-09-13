@@ -2,6 +2,7 @@ import { pool } from "../db";
 import { envKey } from "../env";
 import { sourceStatusUpdate } from "./source-status";
 import { Item, SourceStatus } from "../types";
+import { classify } from "../enrich";
 import https from "https";
 import http from "http";
 import { JSDOM } from "jsdom";
@@ -78,6 +79,11 @@ async function insertItem(item: {
   raw: any;
 }): Promise<boolean> {
   try {
+    const enriched = classify({
+      content: item.content,
+      publishedAt: item.eventTs,
+    });
+
     const result = await pool.query(
       `INSERT INTO items (
         source, 
@@ -87,8 +93,13 @@ async function insertItem(item: {
         published_at, 
         has_media,
         source_uid,
-        raw
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        raw,
+        event_type,
+        severity,
+        is_breaking,
+        lang,
+        enrichment
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
       ON CONFLICT (source, external_id) DO NOTHING
       RETURNING id`,
       [
@@ -99,7 +110,12 @@ async function insertItem(item: {
         item.eventTs,
         item.hasMedia,
         item.channelId,
-        item.raw
+        item.raw,
+        enriched.event_type,
+        enriched.severity,
+        enriched.is_breaking,
+        enriched.lang,
+        JSON.stringify(enriched.enrichment)
       ]
     );
     

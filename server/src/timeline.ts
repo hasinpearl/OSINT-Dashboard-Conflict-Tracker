@@ -1,4 +1,5 @@
 import { pool } from "./db";
+import { classify } from "./enrich";
 
 export type Severity = "critical" | "high" | "developing" | "verified" | "info";
 
@@ -299,9 +300,14 @@ export async function storeItems(items: NewItem[]): Promise<number> {
   const rows = [...byKey.values()];
   if (rows.length === 0) return 0;
 
-  const COLS_PER_ROW = 12;
+  const COLS_PER_ROW = 16;
   const values: unknown[] = [];
   const tuples = rows.map((it, n) => {
+    const enriched = classify({
+      title: it.title,
+      content: it.content,
+      publishedAt: it.publishedAt,
+    });
     values.push(
       it.source,
       it.externalId,
@@ -311,10 +317,16 @@ export async function storeItems(items: NewItem[]): Promise<number> {
       it.title ?? null,
       it.url ?? null,
       it.content ?? "",
-      it.severity ?? null,
+      // Panel routes carry the legacy severity vocabulary the frontend reads.
+      // Only fall back to the classifier when they supplied nothing.
+      it.severity ?? enriched.severity,
       it.confidence ?? null,
       safeIso(it.publishedAt),
       it.raw ? JSON.stringify(it.raw) : null,
+      enriched.event_type,
+      enriched.is_breaking,
+      enriched.lang,
+      JSON.stringify(enriched.enrichment),
     );
     const base = n * COLS_PER_ROW;
     const ph = Array.from({ length: COLS_PER_ROW }, (_, k) => `$${base + k + 1}`);
@@ -325,7 +337,8 @@ export async function storeItems(items: NewItem[]): Promise<number> {
     const { rowCount } = await pool.query(
       `INSERT INTO items
          (source, external_id, conflict, panel, author, title, url, content,
-          severity, confidence, published_at, raw)
+          severity, confidence, published_at, raw,
+          event_type, is_breaking, lang, enrichment)
        VALUES ${tuples.join(", ")}
        ON CONFLICT (source, external_id) DO NOTHING`,
       values,
