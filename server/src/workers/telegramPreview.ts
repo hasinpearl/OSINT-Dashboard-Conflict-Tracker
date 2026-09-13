@@ -28,14 +28,37 @@ function clampFutureTimestamp(date: Date | null): Date | null {
   return date > now ? now : date;
 }
 
-// Function to make HTTP request
-function httpRequest(options: any, postData?: string): Promise<{statusCode: number, headers: any, data: string}> {
+//TUNE: Control the (redirect depth). TG_PREVIEW_MAX_REDIRECTS=hops followed before a request is abandoned.
+const TG_PREVIEW_MAX_REDIRECTS = parseInt(envKey("TG_PREVIEW_MAX_REDIRECTS") || "5");
+
+// Function to make HTTP request, following redirects (t.me/s/ answers 301)
+function httpRequest(
+  options: any,
+  postData?: string,
+  redirectsLeft: number = TG_PREVIEW_MAX_REDIRECTS,
+): Promise<{statusCode: number, headers: any, data: string}> {
   return new Promise((resolve, reject) => {
     const lib = options.protocol === 'https:' ? https : http;
     const req = lib.request(options, (res) => {
+      const status = res.statusCode || 0;
+      if (status >= 300 && status < 400 && res.headers.location && redirectsLeft > 0) {
+        res.resume();
+        const next = new URL(
+          res.headers.location,
+          `${options.protocol || 'https:'}//${options.hostname || options.host}${options.path}`,
+        );
+        resolve(httpRequest({
+          protocol: next.protocol,
+          host: next.host,
+          path: next.pathname + next.search,
+          method: options.method || 'GET',
+          headers: options.headers,
+        }, postData, redirectsLeft - 1));
+        return;
+      }
       let data = '';
       res.on('data', chunk => data += chunk);
-      res.on('end', () => resolve({statusCode: res.statusCode || 0, headers: res.headers, data}));
+      res.on('end', () => resolve({statusCode: status, headers: res.headers, data}));
     });
     req.on('error', reject);
     if (postData) req.write(postData);
@@ -61,7 +84,7 @@ async function insertItem(item: {
         external_id, 
         url, 
         content, 
-        event_ts, 
+        published_at, 
         has_media,
         source_uid,
         raw
@@ -166,6 +189,7 @@ async function processChannel(channelId: string): Promise<void> {
       
       // Fetch page with browser User-Agent
       const options = {
+        protocol: parsedUrl.protocol,
         hostname: parsedUrl.hostname,
         port: parsedUrl.port,
         path: parsedUrl.pathname + parsedUrl.search,

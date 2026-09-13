@@ -47,12 +47,12 @@ export async function telegramRoute(c: Context) {
          url,
          content,
          author,
-         event_ts as timestamp,
+         published_at as timestamp,
          raw
        FROM items 
        WHERE source = 'telegram' 
-         AND event_ts >= NOW() - INTERVAL '2 hours'
-       ORDER BY event_ts DESC 
+         AND published_at >= NOW() - INTERVAL '2 hours'
+       ORDER BY published_at DESC 
        LIMIT 20`
     );
 

@@ -51,7 +51,7 @@ async function insertTelegramMessage(message: {
         url, 
         content, 
         author, 
-        event_ts, 
+        published_at, 
         source_uid, 
         has_media, 
         raw

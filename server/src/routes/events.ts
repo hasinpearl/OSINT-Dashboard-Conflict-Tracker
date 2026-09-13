@@ -31,7 +31,7 @@ export async function eventsRoute(c: Context) {
       url as source_url,
       content as original_text,
       content as summary,
-      event_ts as published_at,
+      published_at,
       ingested_at,
       event_type,
       severity,
@@ -51,12 +51,12 @@ export async function eventsRoute(c: Context) {
   
   // Date filters
   if (since) {
-    query += ` AND event_ts >= $${paramIndex++}`;
+    query += ` AND published_at >= $${paramIndex++}`;
     params.push(new Date(since));
   }
   
   if (until) {
-    query += ` AND event_ts <= $${paramIndex++}`;
+    query += ` AND published_at <= $${paramIndex++}`;
     params.push(new Date(until));
   }
   
@@ -93,12 +93,12 @@ export async function eventsRoute(c: Context) {
       throw new AppError("not_found", "Invalid cursor");
     }
     
-    query += ` AND event_ts < $${paramIndex++}`;
+    query += ` AND published_at < $${paramIndex++}`;
     params.push(cursorDate);
   }
   
   // Order and limit
-  query += ` ORDER BY event_ts DESC, id DESC LIMIT $${paramIndex++}`;
+  query += ` ORDER BY published_at DESC, id DESC LIMIT $${paramIndex++}`;
   params.push(limitNum);
   
   try {
@@ -141,7 +141,7 @@ export async function eventsPinsRoute(c: Context) {
       source,
       url as source_url,
       content as original_text,
-      event_ts as published_at,
+      published_at,
       primary_location
     FROM items
     WHERE primary_location IS NOT NULL
@@ -153,12 +153,12 @@ export async function eventsPinsRoute(c: Context) {
   
   // Date filter
   if (since) {
-    query += ` AND event_ts >= $${paramIndex++}`;
+    query += ` AND published_at >= $${paramIndex++}`;
     params.push(new Date(since));
   }
   
   // Order and limit
-  query += ` ORDER BY event_ts DESC LIMIT $${paramIndex++}`;
+  query += ` ORDER BY published_at DESC LIMIT $${paramIndex++}`;
   params.push(limitNum);
   
   try {
@@ -187,7 +187,7 @@ export async function statsRoute(c: Context) {
     // Events last hour
     const hourResult = await pool.query(`
       SELECT COUNT(*) as count FROM items 
-      WHERE event_ts >= NOW() - INTERVAL '1 hour'
+      WHERE published_at >= NOW() - INTERVAL '1 hour'
         AND noise = false
     `);
     const eventsLastHour = parseInt(hourResult.rows[0].count);
@@ -195,7 +195,7 @@ export async function statsRoute(c: Context) {
     // Events per minute (last hour)
     const minuteResult = await pool.query(`
       SELECT COUNT(*) / 60.0 as avg_per_minute FROM items 
-      WHERE event_ts >= NOW() - INTERVAL '1 hour'
+      WHERE published_at >= NOW() - INTERVAL '1 hour'
         AND noise = false
     `);
     const eventsPerMinute = parseFloat(minuteResult.rows[0].avg_per_minute) || 0;

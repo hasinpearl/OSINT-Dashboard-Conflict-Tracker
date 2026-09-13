@@ -83,7 +83,6 @@ CREATE TABLE IF NOT EXISTS items (
   is_breaking boolean NOT NULL DEFAULT false,
   primary_location jsonb,
   enrichment jsonb,
-  event_ts timestamptz,
   UNIQUE (source, external_id)
 );
 
@@ -92,7 +91,6 @@ CREATE INDEX IF NOT EXISTS items_conflict_panel_idx ON items (conflict, panel);
 CREATE INDEX IF NOT EXISTS items_story_id_idx ON items (story_id);
 CREATE INDEX IF NOT EXISTS items_content_fts_idx ON items
   USING GIN (to_tsvector('simple', content));
-CREATE INDEX IF NOT EXISTS items_event_ts_idx ON items (event_ts DESC NULLS LAST);
 CREATE INDEX IF NOT EXISTS items_event_type_idx ON items (event_type);
 CREATE INDEX IF NOT EXISTS items_source_idx ON items (source);
 
@@ -116,25 +114,33 @@ CREATE TABLE IF NOT EXISTS source_status (
 `;
 
 let ready = false;
+let initPromise: Promise<void> | null = null;
+
 export function isDbReady(): boolean {
   return ready;
 }
 
-export function initDb(): void {
-  void (async () => {
-    for (;;) {
-      try {
-        await pool.query(SCHEMA_SQL);
-        ready = true;
-        console.log("Database schema ready");
-        return;
-      } catch (e) {
-        console.error(
-          "DB init failed, retrying in 5s:",
-          e instanceof Error ? e.message : e,
-        );
-        await new Promise((r) => setTimeout(r, 5000));
+//TUNE: Control the (db retry). DB_INIT_RETRY_MS=wait between schema attempts while Postgres is still starting.
+const DB_INIT_RETRY_MS = 5000;
+
+export function initDb(): Promise<void> {
+  if (!initPromise) {
+    initPromise = (async () => {
+      for (;;) {
+        try {
+          await pool.query(SCHEMA_SQL);
+          ready = true;
+          console.log("Database schema ready");
+          return;
+        } catch (e) {
+          console.error(
+            "DB init failed, retrying in 5s:",
+            e instanceof Error ? e.message : e,
+          );
+          await new Promise((r) => setTimeout(r, DB_INIT_RETRY_MS));
+        }
       }
-    }
-  })();
+    })();
+  }
+  return initPromise;
 }

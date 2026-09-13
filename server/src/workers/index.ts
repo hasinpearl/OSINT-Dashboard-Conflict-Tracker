@@ -2,9 +2,10 @@ import { runRssWorker } from "./rss";
 import { startTelegramWorker } from "./telegram";
 import { runTelegramPreviewWorker } from "./telegramPreview";
 import { envKey } from "../env";
+import { initDb } from "../db";
 
 async function main() {
-  // Check if TG_API_ID is set to determine which Telegram worker to run
+  await initDb();
   const tgApiId = envKey('TG_API_ID');
   
   // Start workers

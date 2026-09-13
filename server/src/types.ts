@@ -22,7 +22,6 @@ export interface Item {
   is_breaking: boolean;
   primary_location?: any;
   enrichment?: any;
-  event_ts?: Date;
 }
 
 export interface SourceStatus {
