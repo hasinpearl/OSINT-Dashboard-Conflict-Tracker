@@ -76,6 +76,14 @@ CREATE TABLE IF NOT EXISTS items (
   raw jsonb,
   story_id bigint REFERENCES stories(id) ON DELETE SET NULL,
   noise boolean NOT NULL DEFAULT false,
+  source_uid text,
+  lang text,
+  has_media boolean NOT NULL DEFAULT false,
+  event_type text,
+  is_breaking boolean NOT NULL DEFAULT false,
+  primary_location jsonb,
+  enrichment jsonb,
+  event_ts timestamptz,
   UNIQUE (source, external_id)
 );
 
@@ -84,12 +92,26 @@ CREATE INDEX IF NOT EXISTS items_conflict_panel_idx ON items (conflict, panel);
 CREATE INDEX IF NOT EXISTS items_story_id_idx ON items (story_id);
 CREATE INDEX IF NOT EXISTS items_content_fts_idx ON items
   USING GIN (to_tsvector('simple', content));
+CREATE INDEX IF NOT EXISTS items_event_ts_idx ON items (event_ts DESC NULLS LAST);
+CREATE INDEX IF NOT EXISTS items_event_type_idx ON items (event_type);
+CREATE INDEX IF NOT EXISTS items_source_idx ON items (source);
 
 CREATE TABLE IF NOT EXISTS collection_runs (
   panel text NOT NULL,
   conflict text NOT NULL,
   ran_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (panel, conflict)
+);
+
+CREATE TABLE IF NOT EXISTS source_status (
+  id text PRIMARY KEY,
+  source text NOT NULL,
+  label text,
+  ok boolean NOT NULL DEFAULT true,
+  detail text,
+  failures integer NOT NULL DEFAULT 0,
+  last_ok timestamptz,
+  updated_at timestamptz NOT NULL DEFAULT now()
 );
 `;
 

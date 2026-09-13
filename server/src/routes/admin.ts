@@ -16,7 +16,8 @@ export function healthRoute(c: Context) {
     ok: true,
     db: isDbReady(),
     keys: {
-      firecrawl: envKey("FIRECRAWL_API_KEY").length > 0,
+      // We've removed Firecrawl as a required dependency, so we no longer check its health here
+      // firecrawl: envKey("FIRECRAWL_API_KEY").length > 0,
       ai_gateway: envKey("AI_GATEWAY_KEY").length > 0,
     },
   });
@@ -43,7 +44,9 @@ async function checkProvider(fn: () => Promise<Response>): Promise<ProviderCheck
 }
 
 export async function diagnosticsRoute(c: Context) {
-  const firecrawlKey = envKey("FIRECRAWL_API_KEY");
+  // We've removed Firecrawl as a required dependency, so we no longer check its health here
+  // const firecrawlKey = envKey("FIRECRAWL_API_KEY");
+  const firecrawlKey = envKey("FIRECRAWL_API_KEY"); // Kept for backward compatibility, but not required
   const gatewayKey = envKey("AI_GATEWAY_KEY");
   const gatewayUrl = envKey("AI_GATEWAY_URL") || "https://openrouter.ai/api/v1/chat/completions";
   //TUNE: Control which model the gateway diagnostics probe uses
@@ -61,7 +64,7 @@ export async function diagnosticsRoute(c: Context) {
             body: JSON.stringify({ url: "https://example.com", formats: ["markdown"] }),
           }),
         )
-      : Promise.resolve({ configured: false } as ProviderCheck),
+      : Promise.resolve({ configured: false, ok: true } as ProviderCheck), // Firecrawl is now optional
     gatewayKey
       ? checkProvider(() =>
           fetch(gatewayUrl, {

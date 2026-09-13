@@ -10,7 +10,7 @@ export const PRICES = {
   perplexity_sonar_pro: 0.015,
 } as const;
 
-export type Provider = "firecrawl" | "openrouter" | "perplexity" | "google_ai";
+export type Provider = "firecrawl" | "openrouter" | "perplexity" | "google_ai" | "database";
 
 interface LogParams {
   panel: string;

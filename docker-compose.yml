@@ -2,44 +2,41 @@ services:
   db:
     image: postgres:16-alpine
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-osint}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-osint}
-      POSTGRES_DB: ${POSTGRES_DB:-osint}
+      POSTGRES_DB: osint
+      POSTGRES_USER: osint
+      POSTGRES_PASSWORD: osint_pass
     volumes:
-      - db-data:/var/lib/postgresql/data
+      - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-osint} -d ${POSTGRES_DB:-osint}"]
-      interval: 5s
+      test: ["CMD-SHELL", "pg_isready -U osint"]
       timeout: 5s
       retries: 10
-    restart: unless-stopped
+    ports:
+      - "5432:5432"
 
   api:
-    build: ./server
+    build: 
+      context: ./server
+      dockerfile: Dockerfile
     environment:
-      DATABASE_URL: postgres://${POSTGRES_USER:-osint}:${POSTGRES_PASSWORD:-osint}@db:5432/${POSTGRES_DB:-osint}
-      PORT: "8787"
-      FIRECRAWL_API_KEY: ${FIRECRAWL_API_KEY:-}
-      AI_GATEWAY_URL: ${AI_GATEWAY_URL:-}
-      AI_GATEWAY_KEY: ${AI_GATEWAY_KEY:-}
-      OPENROUTER_LIGHT_MODEL: ${OPENROUTER_LIGHT_MODEL:-}
-      OPENROUTER_MID_MODEL: ${OPENROUTER_MID_MODEL:-}
-      TIMELINE_MAX_EVENTS: ${TIMELINE_MAX_EVENTS:-40}
-      ADMIN_TOKEN: ${ADMIN_TOKEN:-}
+      DATABASE_URL: postgresql://osint:osint_pass@db:5432/osint
+      PORT: 8787
     depends_on:
       db:
         condition: service_healthy
-    restart: unless-stopped
-
-  web:
-    build: .
-    # Coolify's reverse proxy reaches this container directly on port 80.
-    # A fixed host bind caused "port is already allocated" on deploy.
-    expose:
-      - "80"
+    ports:
+      - "8787:8787"
+      
+  workers:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    environment:
+      DATABASE_URL: postgresql://osint:osint_pass@db:5432/osint
     depends_on:
-      - api
-    restart: unless-stopped
+      db:
+        condition: service_healthy
+    command: ["npm", "run", "workers:start"]
 
 volumes:
-  db-data:
+  postgres_data:

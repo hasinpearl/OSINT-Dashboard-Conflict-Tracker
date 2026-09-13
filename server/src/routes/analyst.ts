@@ -5,6 +5,7 @@ import { getConflictConfig, readConflict, type Expert } from "../conflicts";
 import { searchStructured } from "../agents";
 import { readForceRefresh, readJsonBody } from "../request";
 import { AppError } from "../errors";
+import { extractArticle } from "../extractor";
 
 const CACHE_KEY_BASE = "analyst-curated";
 const PANEL = "analyst";
@@ -79,18 +80,40 @@ STRICT RULES:
 - Use the person's affiliation EXACTLY as given in the list above.
 - Return each person's name EXACTLY as it is written in the list above.
 
-Return JSON: {"comments":[{"analyst":"name exactly as listed","affiliation":"affiliation exactly as listed","comment":"their key quote or analysis, 2-3 sentences","topic":"brief topic","timestamp":"ISO 8601 UTC timestamp e.g. 2026-04-28T14:30:00Z","url":"source url if available"}]}. The timestamp MUST be a valid ISO 8601 UTC timestamp. Do not use relative timestamps. Include as many people from the list as you can find real recent statements for.`,
+Return JSON: {"comments":[{"analyst":"name exactly as listed","affiliation":"affiliation exactly as listed","comment":"their key quote or analysis, 2-3 sentences","topic":"brief topic","url":"source url if available"}]}. Do not include a timestamp field. Include as many people from the list as you can find real recent statements for.`,
     { comments: [] },
   ).catch((e) => {
     console.error("OpenRouter error (analyst):", e instanceof Error ? e.message : e);
     return { comments: [] };
   });
 
+  // Map to store real timestamps from source metadata
+  const timestampMap: Record<string, string | null> = {};
+
+  const comments = Array.isArray(parsed?.comments) ? parsed.comments : [];
+
+  // Collect real timestamps from source metadata
+  const timestampPromises = comments.map(async (comment) => {
+    if (comment.url) {
+      try {
+        const article = await extractArticle(comment.url);
+        timestampMap[comment.url] = article.publishedAt || null;
+      } catch (e) {
+        console.error(`Failed to extract timestamp for ${comment.url}:`, e);
+        timestampMap[comment.url] = null;
+      }
+    }
+  });
+
+  await Promise.all(timestampPromises);
+
+  const filteredComments = filterToRoster(comments, config.experts).map((comment) => ({
+    ...comment,
+    timestamp: timestampMap[comment.url!] || undefined,
+  }));
+
   const filtered = {
-    comments: filterToRoster(
-      Array.isArray(parsed?.comments) ? parsed.comments : [],
-      config.experts,
-    ),
+    comments: filteredComments,
   };
 
   await setCache(CACHE_KEY, filtered);

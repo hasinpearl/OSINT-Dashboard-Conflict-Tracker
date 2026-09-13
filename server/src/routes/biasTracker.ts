@@ -23,7 +23,6 @@ interface BiasData {
   top_left_story: string;
   top_center_story: string;
   top_right_story: string;
-  last_updated: string;
   left_label: string;
   center_label: string;
   right_label: string;
@@ -38,7 +37,6 @@ interface SingleResponse extends BiasData {
 interface AllResponse {
   mode: "all";
   conflicts: Array<BiasData & { conflict: string; label: string }>;
-  last_updated: string;
 }
 
 const num = (v: unknown, d = 0): number => {
@@ -86,7 +84,7 @@ Count how many stories fall into each category. Calculate the percentage for eac
 
 Return ONLY this JSON:
 
-{"total_stories":number,"left_count":number,"center_count":number,"right_count":number,"left_pct":number,"center_pct":number,"right_pct":number,"summary":"2-3 sentences explaining the current narrative landscape - what is dominating the conversation and which direction coverage is leaning","top_left_story":"headline of strongest ${config.biasLeftLabel}-sympathetic story","top_center_story":"headline of most neutral story","top_right_story":"headline of strongest ${config.biasRightLabel}-sympathetic story","last_updated":"ISO 8601 UTC timestamp"}`;
+{"total_stories":number,"left_count":number,"center_count":number,"right_count":number,"left_pct":number,"center_pct":number,"right_pct":number,"summary":"2-3 sentences explaining the current narrative landscape - what is dominating the conversation and which direction coverage is leaning","top_left_story":"headline of strongest ${config.biasLeftLabel}-sympathetic story","top_center_story":"headline of most neutral story","top_right_story":"headline of strongest ${config.biasRightLabel}-sympathetic story"}`;
 
   const parsed = await searchStructured<Partial<BiasData>>(
     PANEL,
@@ -111,7 +109,6 @@ Return ONLY this JSON:
     top_left_story: str(parsed.top_left_story),
     top_center_story: str(parsed.top_center_story),
     top_right_story: str(parsed.top_right_story),
-    last_updated: str(parsed.last_updated, new Date().toISOString()),
     left_label: config.biasLeftLabel,
     center_label: config.biasCenterLabel,
     right_label: config.biasRightLabel,
@@ -169,7 +166,6 @@ export async function biasTrackerRoute(c: Context) {
     const response: AllResponse = {
       mode: "all",
       conflicts,
-      last_updated: new Date().toISOString(),
     };
 
     await setCache(CACHE_KEY, response);

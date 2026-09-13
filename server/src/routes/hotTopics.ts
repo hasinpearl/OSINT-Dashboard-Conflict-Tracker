@@ -1,6 +1,6 @@
 import type { Context } from "hono";
 import { extractStructured } from "../agents";
-import { logCost, logCacheHit, PRICES } from "../costs";
+import { logCacheHit } from "../costs";
 import { getConflictConfig, readConflict } from "../conflicts";
 import { envKey } from "../env";
 import { readForceRefresh, readJsonBody } from "../request";
@@ -28,36 +28,10 @@ interface RawTopic {
   title?: string;
   summary?: string;
   severity?: string;
-  timestamp?: string;
   source?: string;
 }
 
-async function firecrawlScrape(url: string, apiKey: string): Promise<string> {
-  try {
-    const res = await fetch("https://api.firecrawl.dev/v2/scrape", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        url,
-        formats: ["markdown"],
-        onlyMainContent: true,
-      }),
-    });
-    if (!res.ok) {
-      console.error(`Firecrawl scrape failed for ${url}: ${res.status}`);
-      return "";
-    }
-    const data: any = await res.json();
-    const md = data?.data?.markdown ?? data?.markdown ?? "";
-    return typeof md === "string" ? md.slice(0, 3000) : "";
-  } catch (e) {
-    console.error(`Firecrawl error for ${url}:`, e);
-    return "";
-  }
-}
+import { extractArticle } from "../extractor";
 
 function toResponse(events: TimelineEvent[]) {
   return {
@@ -90,9 +64,9 @@ export async function hotTopicsRoute(c: Context) {
 
   const firecrawlKey = envKey("FIRECRAWL_API_KEY");
   const gatewayKey = envKey("AI_GATEWAY_KEY");
-  if (!gatewayKey || !firecrawlKey) {
+  if (!gatewayKey) {
     if (stored.length > 0) return c.json(toResponse(stored));
-    throw new AppError("firecrawl_error");
+    throw new AppError("ai_gateway_key_missing");
   }
 
   const today = new Date().toISOString().split("T")[0];
@@ -100,14 +74,13 @@ export async function hotTopicsRoute(c: Context) {
   const sourcesToScrape = config.newsSources.slice(0, 4);
   const scrapeResults = await Promise.all(
     sourcesToScrape.map(async (sourceUrl) => {
-      logCost({
-        panel: PANEL,
-        provider: "firecrawl",
-        model: "scrape",
-        costUsd: PRICES.firecrawl_scrape,
-      });
-      const md = await firecrawlScrape(sourceUrl, firecrawlKey);
-      return { url: sourceUrl, markdown: md };
+      try {
+        const article = await extractArticle(sourceUrl);
+        return { url: sourceUrl, markdown: article.content ? `TITLE: ${article.title}\nTIMESTAMP: ${article.publishedAt || "NULL"}\n${article.content}` : "" };
+      } catch (e) {
+        console.error(`Error extracting article from ${sourceUrl}:`, e);
+        return { url: sourceUrl, markdown: "" };
+      }
     }),
   );
 
@@ -133,7 +106,7 @@ STRICT RULES:
 - severity: critical (war-changing), high (major military/diplomatic), developing (significant but evolving)
 
 Return ONLY this JSON:
-{"topics":[{"title":"short title max 8 words","summary":"1-2 sentences with key facts","severity":"critical|high|developing","timestamp":"YYYY-MM-DD","source":"which outlet reported this"}]}
+{"topics":[{"title":"short title max 8 words","summary":"1-2 sentences with key facts","severity":"critical|high|developing","source":"which outlet reported this"}]}
 
 SCRAPED CONTENT:
 ${scrapedContent}`;
@@ -156,13 +129,7 @@ ${scrapedContent}`;
   const todayMs = new Date(today + "T23:59:59Z").getTime();
 
   const inRange = (parsed.topics || []).filter((t) => {
-    if (!t || !t.timestamp || !t.title) return false;
-    const ts = new Date(t.timestamp).getTime();
-    if (isNaN(ts)) return false;
-    if (ts < warStart || ts > todayMs) {
-      console.log(`Filtered out-of-range event: ${t.title} (${t.timestamp})`);
-      return false;
-    }
+    if (!t || !t.title) return false;
     return true;
   });
 
@@ -173,7 +140,7 @@ ${scrapedContent}`;
       title: String(t.title),
       summary: String(t.summary ?? ""),
       severity: t.severity,
-      eventDate: String(t.timestamp),
+      eventDate: new Date().toISOString(), // Using current date as we no longer have model-generated timestamps
       source: t.source ? String(t.source) : undefined,
     })),
   );
@@ -181,7 +148,7 @@ ${scrapedContent}`;
   await storeItems(
     inRange.map((t) => ({
       source: String(t.source || "news"),
-      externalId: `hot-topics|${config.key}|${toDateOnly(t.timestamp) ?? today}|${String(
+      externalId: `hot-topics|${config.key}|${new Date().toISOString().split("T")[0]}|${String(
         t.title,
       ).slice(0, 120)}`,
       conflict: config.key,
@@ -189,8 +156,8 @@ ${scrapedContent}`;
       title: String(t.title),
       content: `${t.title}\n\n${t.summary ?? ""}`,
       severity: t.severity,
-      publishedAt: t.timestamp,
-      raw: { collected_by: "hot-topics", scraped_sources: sourcesToScrape },
+      publishedAt: new Date().toISOString(), // Using current date as we no longer have model-generated timestamps
+      raw: { collected_by: "hot-topics" },
     })),
   );
 

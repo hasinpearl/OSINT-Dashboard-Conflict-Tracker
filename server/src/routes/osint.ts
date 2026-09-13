@@ -6,6 +6,7 @@ import { envKey } from "../env";
 import { readForceRefresh, readJsonBody } from "../request";
 import { collectionAgeMs, getRecentItems, markCollected, storeItems } from "../timeline";
 import { AppError } from "../errors";
+import { extractArticle } from "../extractor";
 
 const PANEL = "osint";
 //TUNE: Control how long a collection pass stays fresh before re-collecting
@@ -69,7 +70,7 @@ export async function osintRoute(c: Context) {
       `You are an OSINT analyst covering the ${config.label} conflict in ${config.region}. Return ONLY valid JSON with no markdown.`,
       `Find the top ${MAX_ITEMS} verified OSINT intelligence items about ${config.label} from open sources. STRONGLY PREFER these domains: ${ALLOWED_HOSTS.join(
         ", ",
-      )} (Bellingcat, Janes Defence, OSINT analysts on X/Twitter). Include the most recent items available. Each item MUST have a valid source URL. Do NOT return a message saying no data is available - always return your best findings even if they are older. Focus on military and security activities in ${config.region} relevant to the ${config.label} conflict (key topics: ${config.searchTerms}). Return ONLY JSON: {"items":[{"title":"...","summary":"2 sentences","source":"source name","confidence":"verified|unverified|developing","timestamp":"ISO 8601 UTC timestamp e.g. 2026-04-28T14:30:00Z","url":"https://..."}]}. The timestamp MUST be a valid ISO 8601 UTC timestamp. Do not use relative timestamps. Every item MUST include a valid, clickable source URL from the original report. If you cannot provide a verified source URL for an item, do not include that item.`,
+      )} (Bellingcat, Janes Defence, OSINT analysts on X/Twitter). Include the most recent items available. Each item MUST have a valid source URL. Do NOT return a message saying no data is available - always return your best findings even if they are older. Focus on military and security activities in ${config.region} relevant to the ${config.label} conflict (key topics: ${config.searchTerms}). Return ONLY JSON: {"items":[{"title":"...","summary":"2 sentences","source":"source name","confidence":"verified|unverified|developing","url":"https://..."}]}. Do not include a timestamp field. Every item MUST include a valid, clickable source URL from the original report. If you cannot provide a verified source URL for an item, do not include that item.`,
       { items: [] },
     );
   } catch (e) {
@@ -77,7 +78,25 @@ export async function osintRoute(c: Context) {
     return c.json(toResponse(stored));
   }
 
+  // Map to store real timestamps from source metadata
+  const timestampMap: Record<string, string | null> = {};
+
   const fresh = (parsed.items || []).filter((it) => hasHttpUrl(it?.url));
+
+  // Collect real timestamps from source metadata
+  const timestampPromises = fresh.map(async (it) => {
+    if (it.url) {
+      try {
+        const article = await extractArticle(it.url);
+        timestampMap[it.url] = article.publishedAt || null;
+      } catch (e) {
+        console.error(`Failed to extract timestamp for ${it.url}:`, e);
+        timestampMap[it.url] = null;
+      }
+    }
+  });
+
+  await Promise.all(timestampPromises);
 
   if (fresh.length > 0) {
     const inserted = await storeItems(
@@ -90,7 +109,7 @@ export async function osintRoute(c: Context) {
         url: String(it.url).trim(),
         content: String(it.summary ?? ""),
         confidence: it.confidence ? String(it.confidence) : "developing",
-        publishedAt: it.timestamp,
+        publishedAt: timestampMap[it.url!] || undefined,
         raw: { collected_by: "osint-search" },
       })),
     );

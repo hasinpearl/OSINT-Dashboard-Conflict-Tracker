@@ -22,6 +22,11 @@ export const ERROR_CODES = {
     message: "فشل في بحث Firecrawl | Firecrawl search failed",
     retryable: true,
   },
+  ai_gateway_key_missing: {
+    status: 503,
+    message: "مفتاح بوابة الذكاء مفقود | AI gateway key missing",
+    retryable: false,
+  },
   telegram_fetch_failed: {
     status: 502,
     message: "فشل في جلب بيانات تيليغرام | Telegram fetch failed",

@@ -13,6 +13,7 @@ import { osintRoute } from "./routes/osint";
 import { telegramRoute } from "./routes/telegram";
 import { translateRoute } from "./routes/translate";
 import { enhancedOnError } from "./errors";
+import { eventsRoute, eventsPinsRoute, statsRoute } from "./routes/events";
 
 const app = new Hono();
 
@@ -28,6 +29,11 @@ app.post("/api/telegram-feed", telegramRoute);
 app.post("/api/ai-summarize", hotTopicsRoute);
 app.post("/api/bias-tracker", biasTrackerRoute);
 app.post("/api/translate", translateRoute);
+
+// New events routes
+app.get("/api/events", eventsRoute);
+app.get("/api/events/pins", eventsPinsRoute);
+app.get("/api/stats", statsRoute);
 
 // Admin routes.
 app.post("/api/audit-refresh", requireAdmin, auditRefreshRoute);
