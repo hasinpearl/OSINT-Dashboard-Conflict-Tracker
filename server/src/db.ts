@@ -86,6 +86,17 @@ CREATE TABLE IF NOT EXISTS items (
   UNIQUE (source, external_id)
 );
 
+-- Every column the serving and enrichment code relies on must be added here,
+-- not only declared in CREATE TABLE above. CREATE TABLE IF NOT EXISTS is a
+-- no-op on a database that already has the table, so an index or query that
+-- names a column added only above fails with 42703 on any existing install.
+ALTER TABLE items ADD COLUMN IF NOT EXISTS source_uid text;
+ALTER TABLE items ADD COLUMN IF NOT EXISTS lang text;
+ALTER TABLE items ADD COLUMN IF NOT EXISTS has_media boolean NOT NULL DEFAULT false;
+ALTER TABLE items ADD COLUMN IF NOT EXISTS event_type text;
+ALTER TABLE items ADD COLUMN IF NOT EXISTS is_breaking boolean NOT NULL DEFAULT false;
+ALTER TABLE items ADD COLUMN IF NOT EXISTS primary_location jsonb;
+ALTER TABLE items ADD COLUMN IF NOT EXISTS enrichment jsonb;
 ALTER TABLE items ADD COLUMN IF NOT EXISTS location_precision text;
 ALTER TABLE items ADD COLUMN IF NOT EXISTS location_confidence real;
 ALTER TABLE items ADD COLUMN IF NOT EXISTS geocoded_at timestamptz;
