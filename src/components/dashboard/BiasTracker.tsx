@@ -8,6 +8,7 @@ import { BarChart3 } from "lucide-react";
 import { useLanguage } from "@/i18n/LanguageContext";
 import { useTranslatedData } from "@/hooks/useTranslatedData";
 import { ExpandablePanel } from "./ExpandablePanel";
+import { PanelEmptyState } from "./PanelEmptyState";
 import { useConflictFilter } from "@/contexts/ConflictFilterContext";
 
 interface BiasData {
@@ -134,6 +135,16 @@ export const BiasTracker = () => {
     ? toLatinDigits(new Date(view.last_updated).toLocaleString("en-GB"))
     : null;
 
+  // A real zero reading is not a failure, but all-zero bars are unreadable on
+  // their own, so the explicit state replaces them.
+  const totalCounted =
+    view?.mode === "all"
+      ? view.conflicts.reduce((sum, c) => sum + (c.total_stories ?? 0), 0)
+      : view?.mode === "single"
+        ? view.total_stories ?? 0
+        : 0;
+  const noCoverage = Boolean(view) && totalCounted === 0;
+
   return (
     <ExpandablePanel>
       <div className="flex flex-col h-full bg-card/80 backdrop-blur-md rounded-sm border border-border overflow-hidden">
@@ -154,12 +165,13 @@ export const BiasTracker = () => {
             </div>
           )}
           {error && !isLoading && (
-            <div className="text-sm text-muted-foreground p-4 text-center">
-              <p className="text-severity-critical font-mono text-xs">{t("bias.offline")}</p>
-            </div>
+            <PanelEmptyState kind="error" errorMessage={t("bias.offline")} scope="rss" />
+          )}
+          {!error && !isLoading && noCoverage && (
+            <PanelEmptyState kind="empty" emptyMessage={t("state.noCoverage")} scope="rss" />
           )}
 
-          {view && view.mode === "all" && !isLoading && (
+          {view && view.mode === "all" && !isLoading && !noCoverage && (
             <div className="space-y-4">
               <div className="space-y-4">
                 {view.conflicts.map((c) => (
@@ -190,7 +202,7 @@ export const BiasTracker = () => {
             </div>
           )}
 
-          {view && view.mode === "single" && !isLoading && (
+          {view && view.mode === "single" && !isLoading && !noCoverage && (
             <div className="space-y-4">
               <ConflictBar data={view} />
 

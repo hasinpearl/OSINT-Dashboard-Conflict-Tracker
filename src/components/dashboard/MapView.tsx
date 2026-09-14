@@ -137,6 +137,20 @@ export const MapView = () => {
                 </span>
               </div>
             )}
+            {/* A blank map with a 0 counter cannot be told from a broken one,
+                so the reason is stated over the map rather than left implied. */}
+            {!isLoading && !error && pins.length === 0 && (
+              <div className="absolute inset-x-0 top-1/2 -translate-y-1/2 z-10 flex justify-center px-4 pointer-events-none">
+                <div className="bg-card/95 border border-border px-3 py-2 text-center max-w-xs">
+                  <p className="text-[10px] font-mono font-bold uppercase tracking-wider">
+                    {t("state.noPins")}
+                  </p>
+                  <p className="text-[10px] font-mono text-muted-foreground mt-0.5 leading-relaxed">
+                    {t("state.noPinsHint")}
+                  </p>
+                </div>
+              </div>
+            )}
             <Map
               mapboxAccessToken={MAPBOX_TOKEN}
               mapStyle={MAPBOX_STYLE}

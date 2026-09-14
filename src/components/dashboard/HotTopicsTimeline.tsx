@@ -8,6 +8,7 @@ import { TrendingUp, RefreshCw } from "lucide-react";
 import { useLanguage } from "@/i18n/LanguageContext";
 import { useTranslatedData } from "@/hooks/useTranslatedData";
 import { ExpandablePanel } from "./ExpandablePanel";
+import { PanelEmptyState } from "./PanelEmptyState";
 import { formatLocalDate } from "@/utils/formatTime";
 import { useConflictFilter } from "@/contexts/ConflictFilterContext";
 import { normSeverity } from "@/utils/severity";
@@ -45,6 +46,8 @@ export const HotTopicsTimeline = () => {
   });
 
   const { data: translated } = useTranslatedData(data, "hot-topics");
+
+  const topics = translated?.topics ?? data?.topics ?? [];
 
   const handleManualRefresh = async () => {
     if (isManualRefreshing || isFetching) return;
@@ -89,16 +92,17 @@ export const HotTopicsTimeline = () => {
               ))}
             </div>
           )}
-          {error && (
-            <div className="text-sm text-muted-foreground p-4 text-center">
-              <p className="text-severity-critical font-mono text-xs">{t("topics.offline")}</p>
-            </div>
+          {error && !isLoading && (
+            <PanelEmptyState kind="error" errorMessage={t("topics.offline")} />
           )}
-          {(translated?.topics ?? data?.topics) && !isLoading && (
+          {!error && !isLoading && topics.length === 0 && (
+            <PanelEmptyState kind="empty" emptyMessage={t("state.noTopics")} />
+          )}
+          {!error && !isLoading && topics.length > 0 && (
             <div className="relative">
               <div className="absolute left-2 top-0 bottom-0 w-px bg-border rtl:left-auto rtl:right-2" />
               <div className="space-y-4 pl-6 rtl:pl-0 rtl:pr-6">
-                {[...(translated?.topics ?? data?.topics ?? [])].sort((a, b) => 
+                {[...topics].sort((a, b) => 
                   (b.timestamp || "").localeCompare(a.timestamp || "")
                 ).map((topic, i) => (
                   <div key={i} className="relative">

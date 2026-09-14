@@ -73,7 +73,9 @@ const CONFLICT_KEYWORDS: Record<Exclude<ConflictKey, "all">, string[]> = {
 
 // Editorial bloc per publisher. Used by the bias panel to bucket real coverage
 // counts. A publisher that is not listed counts as neutral rather than being
-// assigned a side.
+// assigned a side. Keys are matched on their leading segment, so every feed of
+// one publisher (bbc_world, bbc_business) shares its bloc without needing a
+// row each.
 //TUNE: Control the (publisher blocs). Which side of the spectrum each feed key or channel counts toward.
 const PUBLISHER_BLOC: Record<string, "west" | "neutral" | "rival"> = {
   bbc: "west",
@@ -84,9 +86,12 @@ const PUBLISHER_BLOC: Record<string, "west" | "neutral" | "rival"> = {
   wired: "west",
   arstechnica: "west",
   techcrunch: "west",
+  space: "west",
   space_com: "west",
   aljazeera: "neutral",
+  un: "neutral",
   un_news: "neutral",
+  google: "neutral",
   google_news: "neutral",
   rt: "rival",
   tass: "rival",
@@ -101,9 +106,17 @@ const PUBLISHER_BLOC: Record<string, "west" | "neutral" | "rival"> = {
   intelslava: "rival",
 };
 
+// Feed keys are "<publisher>_<section>" (bbc_world, jpost_mideast) while
+// Telegram source_uids are bare channel names. An exact hit wins; otherwise the
+// leading segment decides, so a new section of a known publisher inherits its
+// bloc instead of silently falling to neutral.
 export function publisherBloc(sourceUid: string | null): "west" | "neutral" | "rival" {
   if (!sourceUid) return "neutral";
-  return PUBLISHER_BLOC[sourceUid] ?? "neutral";
+  const key = sourceUid.toLowerCase();
+  const exact = PUBLISHER_BLOC[key];
+  if (exact) return exact;
+  const head = key.split("_")[0];
+  return PUBLISHER_BLOC[head] ?? "neutral";
 }
 
 export function legacySeverity(value: string | null): string {

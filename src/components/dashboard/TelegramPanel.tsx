@@ -8,6 +8,7 @@ import { useState } from "react";
 import { useLanguage } from "@/i18n/LanguageContext";
 import { useTranslatedData } from "@/hooks/useTranslatedData";
 import { ExpandablePanel } from "./ExpandablePanel";
+import { PanelEmptyState } from "./PanelEmptyState";
 import { formatLocalDateTime } from "@/utils/formatTime";
 import { useConflictFilter } from "@/contexts/ConflictFilterContext";
 
@@ -63,6 +64,11 @@ export const TelegramPanel = () => {
   const filtered = messages?.filter((m) => activeFilters.has(m.channel)) ?? [];
   const getChannelMeta = (id: string) => CHANNELS.find((c) => c.id === id);
 
+  // Rows that arrived but sit outside the active channel buttons are a filter
+  // state, not an empty store, and saying so stops the user hunting a bug in
+  // the collector.
+  const hiddenByFilter = (messages?.length ?? 0) > 0 && filtered.length === 0;
+
   return (
     <ExpandablePanel>
       <div className="flex flex-col h-full bg-card/80 backdrop-blur-md rounded-sm border border-border overflow-hidden">
@@ -97,11 +103,8 @@ export const TelegramPanel = () => {
               ))}
             </div>
           )}
-          {error && (
-            <div className="text-sm text-muted-foreground p-4 text-center">
-              <p className="text-severity-critical font-mono text-xs">{t("telegram.offline")}</p>
-              <p className="mt-1 text-xs">{t("telegram.error")}</p>
-            </div>
+          {error && !isLoading && (
+            <PanelEmptyState kind="error" errorMessage={t("telegram.offline")} scope="telegram" />
           )}
           {!isLoading && filtered.length > 0 && (
             <div className="space-y-2.5">
@@ -125,7 +128,13 @@ export const TelegramPanel = () => {
             </div>
           )}
           {!isLoading && !error && filtered.length === 0 && (
-            <p className="text-xs text-muted-foreground text-center py-4 font-mono">{t("telegram.noMessages")}</p>
+            hiddenByFilter ? (
+              <p className="text-xs text-muted-foreground text-center py-8 font-mono">
+                {t("telegram.filteredOut")}
+              </p>
+            ) : (
+              <PanelEmptyState kind="empty" emptyMessage={t("state.noMessages")} scope="telegram" />
+            )
           )}
         </ScrollArea>
       </div>

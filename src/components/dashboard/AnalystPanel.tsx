@@ -7,6 +7,7 @@ import { User, Quote, ExternalLink } from "lucide-react";
 import { useLanguage } from "@/i18n/LanguageContext";
 import { useTranslatedData } from "@/hooks/useTranslatedData";
 import { ExpandablePanel } from "./ExpandablePanel";
+import { PanelEmptyState } from "./PanelEmptyState";
 import { formatLocalDateTime } from "@/utils/formatTime";
 import { useConflictFilter } from "@/contexts/ConflictFilterContext";
 
@@ -36,6 +37,8 @@ export const AnalystPanel = () => {
 
   const { data: translated } = useTranslatedData(data, "analyst");
 
+  const comments = translated?.comments ?? data?.comments ?? [];
+
   return (
     <ExpandablePanel>
       <div className="flex flex-col h-full bg-card/80 backdrop-blur-md rounded-sm border border-border overflow-hidden">
@@ -54,20 +57,13 @@ export const AnalystPanel = () => {
               ))}
             </div>
           )}
-          {error && (
-            <div className="text-sm text-muted-foreground p-4 text-center">
-              <p className="text-severity-critical font-mono text-xs">{t("analyst.offline")}</p>
-            </div>
+          {error && !isLoading && (
+            <PanelEmptyState kind="error" errorMessage={t("analyst.offline")} />
           )}
-          {(translated?.comments ?? data?.comments) && (translated?.comments ?? data?.comments)!.length === 0 && !isLoading && (
-            <div className="text-sm text-muted-foreground p-4 text-center">
-              <p className="text-xs font-mono">No analyst commentary available right now</p>
-              <p className="text-[10px] mt-1">Try refreshing in a few minutes</p>
-            </div>
+          {!error && !isLoading && comments.length === 0 && (
+            <PanelEmptyState kind="empty" emptyMessage={t("state.noCommentary")} />
           )}
-          {(() => {
-            const comments = translated?.comments ?? data?.comments;
-            return comments && comments.length > 0 && !isLoading ? (
+          {!error && !isLoading && comments.length > 0 && (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
               {comments.map((item, i) => (
                 <div key={i} className="p-3 bg-muted/50 rounded-sm border border-border">
@@ -105,8 +101,7 @@ export const AnalystPanel = () => {
                 </div>
               ))}
             </div>
-            ) : null;
-          })()}
+          )}
         </ScrollArea>
       </div>
     </ExpandablePanel>

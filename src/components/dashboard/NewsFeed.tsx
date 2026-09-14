@@ -5,6 +5,7 @@ import { useLanguage } from "@/i18n/LanguageContext";
 import { useTranslatedData } from "@/hooks/useTranslatedData";
 import { useNewsStories } from "@/hooks/usePanelData";
 import { ExpandablePanel } from "./ExpandablePanel";
+import { PanelEmptyState } from "./PanelEmptyState";
 import { formatLocalDateTime } from "@/utils/formatTime";
 import { normSeverity } from "@/utils/severity";
 
@@ -14,6 +15,8 @@ export const NewsFeed = () => {
   const { data, isLoading, error } = useNewsStories();
 
   const { data: translated } = useTranslatedData(data, "news-feed");
+
+  const stories = translated?.stories ?? data?.stories ?? [];
 
   return (
     <ExpandablePanel>
@@ -37,15 +40,15 @@ export const NewsFeed = () => {
               ))}
             </div>
           )}
-          {error && (
-            <div className="text-sm text-muted-foreground p-4 text-center">
-              <p className="text-severity-critical font-mono text-xs">{t("news.offline")}</p>
-              <p className="mt-1 text-xs">{t("news.error")}</p>
-            </div>
+          {error && !isLoading && (
+            <PanelEmptyState kind="error" errorMessage={t("news.offline")} scope="rss" />
           )}
-          {(translated?.stories ?? data?.stories) && !isLoading && (
+          {!error && !isLoading && stories.length === 0 && (
+            <PanelEmptyState kind="empty" emptyMessage={t("state.noStories")} scope="rss" />
+          )}
+          {!error && !isLoading && stories.length > 0 && (
             <div className="space-y-3">
-              {(translated?.stories ?? data?.stories ?? []).map((item, i) => (
+              {stories.map((item, i) => (
                 <article key={i} className="pb-3 border-b border-border last:border-0">
                   <div className="flex items-start justify-between gap-2">
                     <h3 className="text-sm font-semibold leading-tight">{item.headline}</h3>

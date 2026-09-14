@@ -14,6 +14,7 @@ import { telegramRoute } from "./routes/telegram";
 import { translateRoute } from "./routes/translate";
 import { enhancedOnError } from "./errors";
 import { eventsRoute, eventsPinsRoute, statsRoute } from "./routes/events";
+import { sourcesRoute } from "./routes/sources";
 
 const app = new Hono();
 
@@ -34,6 +35,10 @@ app.post("/api/translate", translateRoute);
 app.get("/api/events", eventsRoute);
 app.get("/api/events/pins", eventsPinsRoute);
 app.get("/api/stats", statsRoute);
+
+// Worker health. Unauthenticated on purpose: the panels read it to tell an
+// empty store apart from an unreachable source.
+app.get("/api/sources", sourcesRoute);
 
 // Admin routes.
 app.post("/api/audit-refresh", requireAdmin, auditRefreshRoute);

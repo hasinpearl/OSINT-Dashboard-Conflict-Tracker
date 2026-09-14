@@ -7,6 +7,7 @@ import { Eye, ExternalLink } from "lucide-react";
 import { useLanguage } from "@/i18n/LanguageContext";
 import { useTranslatedData } from "@/hooks/useTranslatedData";
 import { ExpandablePanel } from "./ExpandablePanel";
+import { PanelEmptyState } from "./PanelEmptyState";
 import { formatLocalDateTime } from "@/utils/formatTime";
 import { useConflictFilter } from "@/contexts/ConflictFilterContext";
 
@@ -77,27 +78,24 @@ export const OsintPanel = () => {
               ))}
             </div>
           )}
-          {error && (
-            <div className="text-sm text-muted-foreground p-4 text-center">
-              <p className="text-severity-critical font-mono text-xs">{t("osint.offline")}</p>
-            </div>
+          {error && !isLoading && (
+            <PanelEmptyState kind="error" errorMessage={t("osint.offline")} />
           )}
-          {(() => {
+          {!error && !isLoading && (() => {
             const rawItems = translated?.items ?? data?.items ?? [];
-            if (!isLoading && isNoDataPlaceholder(rawItems)) {
-              return (
-                <div className="space-y-3">
-                  {[...Array(3)].map((_, i) => (
-                    <Skeleton key={i} className="h-16 w-full" />
-                  ))}
-                  <p className="text-xs text-muted-foreground text-center">Updating...</p>
-                </div>
-              );
+            // A placeholder row is the server saying it has nothing. Rendering
+            // skeletons for it claimed the panel was still loading forever.
+            const items = isNoDataPlaceholder(rawItems)
+              ? []
+              : rawItems.filter((item: OsintItem) =>
+                  !/(no .*(reports?|results?|data) available|unable to retrieve|couldn'?t find)/i.test(item.title ?? "")
+                );
+
+            if (items.length === 0) {
+              return <PanelEmptyState kind="empty" emptyMessage={t("state.noOsint")} />;
             }
-            const items = rawItems.filter((item: OsintItem) =>
-              !/(no .*(reports?|results?|data) available|unable to retrieve|couldn'?t find)/i.test(item.title ?? "")
-            );
-            return items.length > 0 && !isLoading ? (
+
+            return (
             <div className="space-y-3">
               {[...items].sort((a: OsintItem, b: OsintItem) => {
                 const at = a.timestamp ? new Date(a.timestamp).getTime() : 0;
@@ -129,7 +127,7 @@ export const OsintPanel = () => {
                 </div>
               ))}
             </div>
-            ) : null;
+            );
           })()}
         </ScrollArea>
       </div>

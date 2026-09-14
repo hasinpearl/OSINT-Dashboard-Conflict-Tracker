@@ -32,6 +32,10 @@ const translations: Record<string, Record<Language, string>> = {
   "telegram.offline": { en: "FEED OFFLINE", ar: "التغذية غير متصلة" },
   "telegram.error": { en: "Unable to fetch Telegram data", ar: "تعذر جلب بيانات تيليغرام" },
   "telegram.noMessages": { en: "NO MESSAGES", ar: "لا توجد رسائل" },
+  "telegram.filteredOut": {
+    en: "Messages are in store but every one is hidden by the channel filter above.",
+    ar: "توجد رسائل في المخزن لكن مرشح القنوات أعلاه يخفيها كلها.",
+  },
 
   "live.title": { en: "LIVE NEWS", ar: "البث المباشر" },
 
@@ -87,6 +91,53 @@ const translations: Record<string, Record<Language, string>> = {
   },
 
   "ticker.breaking": { en: "BREAKING", ar: "عاجل" },
+  "ticker.empty": { en: "NO BREAKING ITEMS", ar: "لا أخبار عاجلة" },
+  "ticker.emptyHint": {
+    en: "The ticker is live. Nothing in store is flagged breaking right now.",
+    ar: "الشريط يعمل. لا يوجد حاليًا ما هو مصنف كخبر عاجل.",
+  },
+  "ticker.offline": { en: "TICKER OFFLINE", ar: "الشريط غير متصل" },
+
+  // Panel states. An empty panel and a broken one must never read alike, so
+  // each reason gets its own wording.
+  "state.panelOffline": { en: "PANEL OFFLINE", ar: "اللوحة غير متصلة" },
+  "state.panelOfflineHint": {
+    en: "The request to the API failed. The panel retries on its own.",
+    ar: "فشل الطلب إلى الواجهة البرمجية. تعيد اللوحة المحاولة تلقائيًا.",
+  },
+  "state.noDataYet": { en: "NO DATA YET", ar: "لا توجد بيانات بعد" },
+  "state.noDataYetHint": {
+    en: "The panel is working and the store holds nothing matching this filter yet.",
+    ar: "اللوحة تعمل ولا يوجد في المخزن ما يطابق هذا المرشح بعد.",
+  },
+  "state.collectorsNeverRan": { en: "COLLECTORS NEVER RAN", ar: "لم تعمل أدوات الجمع" },
+  "state.collectorsNeverRanHint": {
+    en: "No source has reported any status, so nothing has been collected into this database.",
+    ar: "لم يبلغ أي مصدر عن حالته، أي أنه لم يُجمع شيء في قاعدة البيانات هذه.",
+  },
+  "state.allSourcesDown": { en: "ALL SOURCES UNREACHABLE", ar: "كل المصادر غير متاحة" },
+  "state.someSourcesDown": { en: "Sources unreachable:", ar: "مصادر غير متاحة:" },
+  "state.sourcesStale": { en: "Sources not reporting:", ar: "مصادر لا تبلغ عن حالتها:" },
+  "state.statusUnknown": { en: "SOURCE STATUS UNKNOWN", ar: "حالة المصادر غير معروفة" },
+  "state.statusUnknownHint": {
+    en: "The store is empty and /api/sources did not answer, so the cause cannot be named.",
+    ar: "المخزن فارغ ولم تستجب ‎/api/sources، لذا لا يمكن تحديد السبب.",
+  },
+  "state.noStories": { en: "NO STORIES IN STORE", ar: "لا توجد أخبار في المخزن" },
+  "state.noMessages": { en: "NO MESSAGES IN STORE", ar: "لا توجد رسائل في المخزن" },
+  "state.noOsint": { en: "NO OSINT ITEMS IN STORE", ar: "لا توجد عناصر استخبارية في المخزن" },
+  "state.noTopics": { en: "NO DEVELOPMENTS IN STORE", ar: "لا توجد تطورات في المخزن" },
+  "state.noCommentary": { en: "NO ATTRIBUTED PIECES IN STORE", ar: "لا توجد مواد منسوبة في المخزن" },
+  "state.noCoverage": { en: "NO COVERAGE TO MEASURE", ar: "لا تغطية لقياسها" },
+  "state.noCoverageHint": {
+    en: "The spectrum needs stored coverage of this conflict. Nothing has been collected for it yet.",
+    ar: "يحتاج التوزيع إلى تغطية مخزنة لهذا الصراع. لم يُجمع شيء له بعد.",
+  },
+  "state.noPins": { en: "NO GEOLOCATED EVENTS", ar: "لا أحداث محددة الموقع" },
+  "state.noPinsHint": {
+    en: "Stored items carry no resolved coordinates yet, so the map has nothing to plot.",
+    ar: "العناصر المخزنة لا تحمل إحداثيات محددة بعد، لذا لا يوجد ما ترسمه الخريطة.",
+  },
 
   "notifications.title": { en: "Notifications", ar: "الإشعارات" },
   "notifications.empty": { en: "No notifications yet", ar: "لا توجد إشعارات بعد" },
