@@ -4,7 +4,7 @@ import { logCacheHit } from "../costs";
 import { getConflictConfig, readConflict } from "../conflicts";
 import { readForceRefresh, readJsonBody } from "../request";
 import { AppError } from "../errors";
-import { deriveSummary, fetchItems, isoOrNull, telegramMessageId } from "../serving";
+import { countItems, deriveSummary, fetchItems, isoOrNull, telegramMessageId } from "../serving";
 
 const CACHE_KEY_BASE = "telegram-feed";
 const PANEL = "telegram";
@@ -12,8 +12,11 @@ const PANEL = "telegram";
 // Named so the cache layer never pins an empty answer over a filling database.
 const LIST_FIELD = "messages";
 
+// The collector holds over nine hundred posts, and the panel used to show one
+// of them. Forty was never the reason: the conflict filter was, so it is fixed
+// in serving.ts and the panel size is raised to something worth scrolling.
 //TUNE: Control the (telegram panel size). Messages returned per panel load.
-const MAX_MESSAGES = 40;
+const MAX_MESSAGES = 200;
 
 //TUNE: Control the (telegram cache ttl). How long a served page stays reusable before the DB is read again.
 const CACHE_TTL_MS = 2 * 60 * 1000;
@@ -42,6 +45,16 @@ export async function telegramRoute(c: Context) {
       requireText: true,
     });
 
+    // The panel says how many messages match the tab in the whole store, not
+    // just how many fit on a page. A feed showing 200 of 383 and a feed holding
+    // exactly 200 are different situations and the panel has to be able to tell
+    // the reader which one it is in.
+    const matching = await countItems({
+      conflict: config.key,
+      source: "telegram",
+      requireText: true,
+    });
+
     const messages = rows.map((row) => ({
       channel: row.source_uid ?? row.source,
       text: deriveSummary(row),
@@ -50,7 +63,7 @@ export async function telegramRoute(c: Context) {
       url: row.url ?? undefined,
     }));
 
-    const result = { messages };
+    const result = { messages, matching_in_store: matching, returned: messages.length };
     await setCache(CACHE_KEY, result, LIST_FIELD);
     return c.json(result);
   } catch (e) {

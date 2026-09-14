@@ -1,31 +1,28 @@
 import type { Context } from "hono";
-import { FORCE_MIN_AGE_MS, getCached, setCache } from "../cache";
+import { getCached, setCache } from "../cache";
 import { logCacheHit } from "../costs";
 import { CONFLICT_CONFIG, getConflictConfig, readConflict, type ConflictConfig } from "../conflicts";
 import { readForceRefresh, readJsonBody } from "../request";
 import { AppError } from "../errors";
-import {
-  deriveTitle,
-  fetchItems,
-  isoOrNull,
-  publisherBloc,
-  type ServingRow,
-} from "../serving";
+import { assessBias, EDITORIAL_MODEL, toCandidates, type Bloc } from "../editorial";
+import { deriveTitle, fetchItems, isoOrNull, outletName, type ServingRow } from "../serving";
 
 const CACHE_KEY_BASE = "bias-tracker";
 const PANEL = "bias-tracker";
 
-//TUNE: Control the (bias cache ttl). How long a computed spectrum stays reusable before the DB is read again.
+//TUNE: Control the (bias cache ttl). How long a computed spectrum stays reusable before it is recomputed.
 const CACHE_TTL_MS = 12 * 60 * 60 * 1000;
 
 //TUNE: Control the (bias force ttl). Min age a force refresh will accept before recomputing.
 const FORCE_TTL_MS = 5 * 60 * 1000;
 
-//TUNE: Control the (bias sample size). Rows counted per conflict when computing the spectrum.
-const SAMPLE_LIMIT = 500;
+//TUNE: Control the (bias sample size). Stored rows offered to the assessment per conflict.
+const SAMPLE_LIMIT = 60;
 
 //TUNE: Control the (bias window). Hours of coverage the spectrum is computed over.
 const WINDOW_HOURS = 7 * 24;
+
+const BLOCS: Bloc[] = ["left", "center", "right"];
 
 interface BiasData {
   total_stories: number;
@@ -39,10 +36,17 @@ interface BiasData {
   top_left_story: string;
   top_center_story: string;
   top_right_story: string;
+  left_framing: string;
+  center_framing: string;
+  right_framing: string;
+  outlets_present: string[];
+  outlets_by_bloc: Record<Bloc, string[]>;
+  silent_blocs: string[];
   last_updated: string | null;
   left_label: string;
   center_label: string;
   right_label: string;
+  assessed_by: string;
 }
 
 interface SingleResponse extends BiasData {
@@ -55,6 +59,7 @@ interface AllResponse {
   mode: "all";
   conflicts: Array<BiasData & { conflict: string; label: string }>;
   last_updated: string | null;
+  assessed_by: string;
 }
 
 function pct(part: number, total: number): number {
@@ -62,40 +67,57 @@ function pct(part: number, total: number): number {
   return Math.round((part / total) * 1000) / 10;
 }
 
-// The summary states what the counts show. It reports the measurement, it does
-// not editorialise beyond it.
-function describe(config: ConflictConfig, buckets: Record<string, ServingRow[]>, total: number): string {
+// Silence is a finding. A side with no coverage in the window is named, and so
+// are the outlets in the corpus that did not carry that side's narrative, so
+// the reader can see which desks were quiet rather than a blank bar.
+function describeSilence(
+  config: ConflictConfig,
+  labels: Record<Bloc, string>,
+  counts: Record<Bloc, number>,
+  outletsByBloc: Record<Bloc, string[]>,
+  outletsPresent: string[],
+  total: number,
+): { summarySuffix: string; silent: string[] } {
   const windowDays = Math.round(WINDOW_HOURS / 24);
   if (total === 0) {
-    return `No stored coverage of ${config.label} in the last ${windowDays} days, so there is no spectrum to report.`;
+    return {
+      summarySuffix: `No stored coverage of ${config.label} in the last ${windowDays} days, so there is no spectrum to report.`,
+      silent: BLOCS.map((b) => labels[b]),
+    };
   }
-  const ranked = (
-    [
-      ["left", config.biasLeftLabel],
-      ["center", config.biasCenterLabel],
-      ["right", config.biasRightLabel],
-    ] as const
-  )
-    .map(([key, label]) => ({ label, count: buckets[key].length }))
-    .sort((a, b) => b.count - a.count);
 
-  const lead = ranked[0];
-  const zero = ranked.filter((r) => r.count === 0).map((r) => r.label);
-  const parts = [
-    `${total} stories on ${config.label} in the last ${windowDays} days, counted by publisher bloc.`,
-    `${lead.label} outlets account for the largest share at ${pct(lead.count, total)}%.`,
-  ];
-  if (zero.length > 0) {
-    parts.push(`No coverage from ${zero.join(" or ")} outlets landed in this window.`);
+  const silentBlocs = BLOCS.filter((b) => counts[b] === 0);
+  if (silentBlocs.length === 0) return { summarySuffix: "", silent: [] };
+
+  const carried = new Set(BLOCS.flatMap((b) => outletsByBloc[b]));
+  const notCarrying = outletsPresent.filter((o) => !carried.has(o));
+
+  const parts = silentBlocs.map(
+    (b) => `No report in this window carried the ${labels[b]} narrative.`,
+  );
+  if (notCarrying.length > 0) {
+    parts.push(
+      `Present in the window but carrying none of the absent narratives: ${notCarrying.join(", ")}.`,
+    );
   }
-  return parts.join(" ");
+  return { summarySuffix: parts.join(" "), silent: silentBlocs.map((b) => labels[b]) };
 }
 
-// Counts real published coverage, not channel posts: the bloc of a Telegram
-// channel is not an editorial line the panel can defend. An empty window
-// returns a real zero reading rather than an error, so the panel can say there
-// was no coverage instead of claiming it is offline.
+// Counts published coverage, not channel posts: the bloc of a Telegram channel
+// is not an editorial line the panel can defend.
+//
+// The counts are counts of real stored rows. What the model decides is which
+// bloc each stored row's narrative belongs to, which is the judgement counting
+// publisher blocs could not make: most stored outlets are Western, so bucketing
+// by publisher collapsed the whole spectrum onto one side regardless of what
+// the reports actually said.
 async function analyzeOne(config: ConflictConfig): Promise<BiasData> {
+  const labels: Record<Bloc, string> = {
+    left: config.biasLeftLabel,
+    center: config.biasCenterLabel,
+    right: config.biasRightLabel,
+  };
+
   const rows = await fetchItems({
     conflict: config.key,
     source: "rss",
@@ -104,38 +126,112 @@ async function analyzeOne(config: ConflictConfig): Promise<BiasData> {
     sinceHours: WINDOW_HOURS,
   });
 
-  const buckets: Record<string, ServingRow[]> = { left: [], center: [], right: [] };
-  for (const row of rows) {
-    const bloc = publisherBloc(row.source_uid);
-    if (bloc === "west") buckets.left.push(row);
-    else if (bloc === "rival") buckets.right.push(row);
-    else buckets.center.push(row);
+  const outletsPresent = Array.from(new Set(rows.map((r) => outletName(r)))).sort();
+
+  const empty = (): BiasData => ({
+    total_stories: 0,
+    left_count: 0,
+    center_count: 0,
+    right_count: 0,
+    left_pct: 0,
+    center_pct: 0,
+    right_pct: 0,
+    summary: describeSilence(config, labels, { left: 0, center: 0, right: 0 }, { left: [], center: [], right: [] }, [], 0)
+      .summarySuffix,
+    top_left_story: "",
+    top_center_story: "",
+    top_right_story: "",
+    left_framing: "",
+    center_framing: "",
+    right_framing: "",
+    outlets_present: [],
+    outlets_by_bloc: { left: [], center: [], right: [] },
+    silent_blocs: BLOCS.map((b) => labels[b]),
+    last_updated: null,
+    left_label: labels.left,
+    center_label: labels.center,
+    right_label: labels.right,
+    assessed_by: EDITORIAL_MODEL,
+  });
+
+  if (rows.length === 0) return empty();
+
+  const candidates = toCandidates(rows);
+  const assessment = await assessBias(PANEL, config.label, labels, candidates, outletsPresent);
+
+  if (assessment.rejectedIds.length > 0) {
+    console.warn(
+      `bias-tracker(${config.key}): dropped ${assessment.rejectedIds.length} ids not present in the sample`,
+    );
   }
 
-  const total = rows.length;
-  const headline = (key: string): string => {
-    const row = buckets[key][0];
-    return row ? deriveTitle(row) : "";
+  const buckets: Record<Bloc, ServingRow[]> = { left: [], center: [], right: [] };
+  for (const candidate of candidates) {
+    const bloc = assessment.assigned.get(candidate.id);
+    if (!bloc) continue;
+    buckets[bloc].push(candidate.row);
+  }
+
+  const counts: Record<Bloc, number> = {
+    left: buckets.left.length,
+    center: buckets.center.length,
+    right: buckets.right.length,
+  };
+  const total = counts.left + counts.center + counts.right;
+
+  const outletsByBloc: Record<Bloc, string[]> = {
+    left: Array.from(new Set(buckets.left.map(outletName))).sort(),
+    center: Array.from(new Set(buckets.center.map(outletName))).sort(),
+    right: Array.from(new Set(buckets.right.map(outletName))).sort(),
   };
 
-  // Rows come back newest first, so the first row carries the newest real
-  // published_at in the counted set.
+  if (total === 0) {
+    const blank = empty();
+    return { ...blank, outlets_present: outletsPresent };
+  }
+
+  const { summarySuffix, silent } = describeSilence(
+    config,
+    labels,
+    counts,
+    outletsByBloc,
+    outletsPresent,
+    total,
+  );
+
+  const summary = [assessment.summary, summarySuffix].filter((s) => s.length > 0).join(" ");
+
+  // Rows come back newest first, so the first row of a bucket carries that
+  // bucket's newest real published_at.
+  const newest = [...rows]
+    .map((r) => isoOrNull(r.published_at))
+    .filter((t): t is string => Boolean(t))
+    .sort()
+    .pop() ?? null;
+
   return {
     total_stories: total,
-    left_count: buckets.left.length,
-    center_count: buckets.center.length,
-    right_count: buckets.right.length,
-    left_pct: pct(buckets.left.length, total),
-    center_pct: pct(buckets.center.length, total),
-    right_pct: pct(buckets.right.length, total),
-    summary: describe(config, buckets, total),
-    top_left_story: headline("left"),
-    top_center_story: headline("center"),
-    top_right_story: headline("right"),
-    last_updated: total > 0 ? isoOrNull(rows[0].published_at) : null,
-    left_label: config.biasLeftLabel,
-    center_label: config.biasCenterLabel,
-    right_label: config.biasRightLabel,
+    left_count: counts.left,
+    center_count: counts.center,
+    right_count: counts.right,
+    left_pct: pct(counts.left, total),
+    center_pct: pct(counts.center, total),
+    right_pct: pct(counts.right, total),
+    summary,
+    top_left_story: buckets.left[0] ? deriveTitle(buckets.left[0]) : "",
+    top_center_story: buckets.center[0] ? deriveTitle(buckets.center[0]) : "",
+    top_right_story: buckets.right[0] ? deriveTitle(buckets.right[0]) : "",
+    left_framing: assessment.framing.left,
+    center_framing: assessment.framing.center,
+    right_framing: assessment.framing.right,
+    outlets_present: outletsPresent,
+    outlets_by_bloc: outletsByBloc,
+    silent_blocs: silent,
+    last_updated: newest,
+    left_label: labels.left,
+    center_label: labels.center,
+    right_label: labels.right,
+    assessed_by: EDITORIAL_MODEL,
   };
 }
 
@@ -168,7 +264,12 @@ export async function biasTrackerRoute(c: Context) {
         .sort()
         .pop() ?? null;
 
-      const response: AllResponse = { mode: "all", conflicts, last_updated: newest };
+      const response: AllResponse = {
+        mode: "all",
+        conflicts,
+        last_updated: newest,
+        assessed_by: EDITORIAL_MODEL,
+      };
       await setCache(CACHE_KEY, response);
       return c.json(response);
     }

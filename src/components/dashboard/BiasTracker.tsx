@@ -23,10 +23,17 @@ interface BiasData {
   top_left_story: string;
   top_center_story: string;
   top_right_story: string;
+  left_framing?: string;
+  center_framing?: string;
+  right_framing?: string;
+  outlets_present?: string[];
+  outlets_by_bloc?: { left: string[]; center: string[]; right: string[] };
+  silent_blocs?: string[];
   last_updated: string;
   left_label: string;
   center_label: string;
   right_label: string;
+  assessed_by?: string;
 }
 
 interface SingleResponse extends BiasData {
@@ -105,11 +112,54 @@ const ConflictBar = ({
       centerLabel={data.center_label}
       rightLabel={data.right_label}
     />
+    {/* Percentage and the real count behind it. A percentage on its own cannot
+        distinguish one story out of two from fifty out of a hundred. */}
     <div className="flex justify-between text-[11px] font-mono">
-      <span className="text-[#3B82F6]">{Math.round(data.left_pct)}%</span>
-      <span className="text-[#DBDBDB] dark:text-[#9CA3AF]">{Math.round(data.center_pct)}%</span>
-      <span className="text-[#EF4444]">{Math.round(data.right_pct)}%</span>
+      <span className="text-[#3B82F6]">{Math.round(data.left_pct)}% ({data.left_count})</span>
+      <span className="text-[#DBDBDB] dark:text-[#9CA3AF]">
+        {Math.round(data.center_pct)}% ({data.center_count})
+      </span>
+      <span className="text-[#EF4444]">{Math.round(data.right_pct)}% ({data.right_count})</span>
     </div>
+  </div>
+);
+
+// Framing, the outlets actually behind each side, and the named silence when a
+// side has no coverage in the window.
+const BlocDetail = ({
+  label,
+  color,
+  count,
+  framing,
+  story,
+  outlets,
+  silentLabel,
+}: {
+  label: string;
+  color: string;
+  count: number;
+  framing?: string;
+  story?: string;
+  outlets?: string[];
+  silentLabel: string;
+}) => (
+  <div>
+    <div className={`text-[10px] font-mono uppercase mb-0.5 ${color}`}>
+      {label} · {count}
+    </div>
+    {count === 0 ? (
+      <p className="text-xs text-muted-foreground leading-snug italic">{silentLabel}</p>
+    ) : (
+      <>
+        {framing && <p className="text-xs text-foreground/90 leading-snug">{framing}</p>}
+        {story && <p className="text-[11px] text-muted-foreground leading-snug mt-0.5">{story}</p>}
+        {outlets && outlets.length > 0 && (
+          <p className="text-[9px] font-mono text-muted-foreground/60 mt-0.5">
+            {outlets.join(", ")}
+          </p>
+        )}
+      </>
+    )}
   </div>
 );
 
@@ -210,33 +260,50 @@ export const BiasTracker = () => {
                 <p className="text-xs text-foreground/90 leading-relaxed">{view.summary}</p>
               )}
 
-              {/* Example headlines */}
+              {/* Example headlines, the framing behind each side, and the
+                  outlets that carried it. */}
               <div className="space-y-2 pt-2 border-t border-border">
-                {view.top_left_story && (
-                  <div>
-                    <div className="text-[10px] font-mono uppercase text-[#3B82F6] mb-0.5">
-                      {view.left_label}
-                    </div>
-                    <p className="text-xs text-foreground/90 leading-snug">{view.top_left_story}</p>
-                  </div>
-                )}
-                {view.top_center_story && (
-                  <div>
-                    <div className="text-[10px] font-mono uppercase text-muted-foreground mb-0.5">
-                      {view.center_label}
-                    </div>
-                    <p className="text-xs text-foreground/90 leading-snug">{view.top_center_story}</p>
-                  </div>
-                )}
-                {view.top_right_story && (
-                  <div>
-                    <div className="text-[10px] font-mono uppercase text-[#EF4444] mb-0.5">
-                      {view.right_label}
-                    </div>
-                    <p className="text-xs text-foreground/90 leading-snug">{view.top_right_story}</p>
-                  </div>
-                )}
+                <BlocDetail
+                  label={view.left_label}
+                  color="text-[#3B82F6]"
+                  count={view.left_count}
+                  framing={view.left_framing}
+                  story={view.top_left_story}
+                  outlets={view.outlets_by_bloc?.left}
+                  silentLabel={t("bias.noCoverageThisSide")}
+                />
+                <BlocDetail
+                  label={view.center_label}
+                  color="text-muted-foreground"
+                  count={view.center_count}
+                  framing={view.center_framing}
+                  story={view.top_center_story}
+                  outlets={view.outlets_by_bloc?.center}
+                  silentLabel={t("bias.noCoverageThisSide")}
+                />
+                <BlocDetail
+                  label={view.right_label}
+                  color="text-[#EF4444]"
+                  count={view.right_count}
+                  framing={view.right_framing}
+                  story={view.top_right_story}
+                  outlets={view.outlets_by_bloc?.right}
+                  silentLabel={t("bias.noCoverageThisSide")}
+                />
               </div>
+
+              {/* Every outlet in the window, so the reader can see the corpus
+                  the spectrum was measured over. */}
+              {view.outlets_present && view.outlets_present.length > 0 && (
+                <div className="pt-2 border-t border-border">
+                  <div className="text-[10px] font-mono uppercase text-muted-foreground mb-0.5">
+                    {t("bias.outletsInWindow")}
+                  </div>
+                  <p className="text-[9px] font-mono text-muted-foreground/70 leading-relaxed">
+                    {view.outlets_present.join(", ")}
+                  </p>
+                </div>
+              )}
 
               {lastAnalyzed && (
                 <div className="text-[10px] font-mono text-muted-foreground pt-2 border-t border-border">

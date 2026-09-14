@@ -14,12 +14,30 @@ import { useConflictFilter } from "@/contexts/ConflictFilterContext";
 import { normSeverity } from "@/utils/severity";
 
 interface HotTopic {
+  item_id?: string;
   title: string;
   summary: string;
+  significance?: string;
   severity: "critical" | "high" | "developing" | "verified" | "info";
-  mentions?: number;
+  event_type?: string;
+  conflict?: string;
   source?: string;
   timestamp: string;
+  url?: string;
+}
+
+interface ConflictRollup {
+  conflict: string;
+  label: string;
+  selected: number;
+  candidates_considered: number;
+  informational_excluded: number;
+}
+
+interface HotTopicsResponse {
+  topics: HotTopic[];
+  conflicts?: ConflictRollup[];
+  selected_by?: string;
 }
 
 export const HotTopicsTimeline = () => {
@@ -36,7 +54,7 @@ export const HotTopicsTimeline = () => {
         forceNextRef.current || shouldForceRefresh(`hot-topics:${conflict}`);
       forceNextRef.current = false;
 
-      return invokeFn<{ topics: HotTopic[] }>("ai-summarize", {
+      return invokeFn<HotTopicsResponse>("ai-summarize", {
         conflict,
         ...(shouldForce ? { force_refresh: true } : {}),
       });
@@ -48,6 +66,13 @@ export const HotTopicsTimeline = () => {
   const { data: translated } = useTranslatedData(data, "hot-topics");
 
   const topics = translated?.topics ?? data?.topics ?? [];
+  const rollups = data?.conflicts ?? [];
+
+  // An empty timeline is a real answer when nothing in the window materially
+  // changed the situation, so the panel says that rather than implying the
+  // store is empty. The numbers behind it come from the response.
+  const considered = rollups.reduce((n, r) => n + r.candidates_considered, 0);
+  const excluded = rollups.reduce((n, r) => n + r.informational_excluded, 0);
 
   const handleManualRefresh = async () => {
     if (isManualRefreshing || isFetching) return;
@@ -96,7 +121,14 @@ export const HotTopicsTimeline = () => {
             <PanelEmptyState kind="error" errorMessage={t("topics.offline")} />
           )}
           {!error && !isLoading && topics.length === 0 && (
-            <PanelEmptyState kind="empty" emptyMessage={t("state.noTopics")} />
+            <PanelEmptyState
+              kind="empty"
+              emptyMessage={
+                considered > 0
+                  ? `${t("state.noTopics")} ${t("topics.quietWindow")} (${considered} / ${excluded})`
+                  : t("state.noTopics")
+              }
+            />
           )}
           {!error && !isLoading && topics.length > 0 && (
             <div className="relative">
@@ -105,7 +137,7 @@ export const HotTopicsTimeline = () => {
                 {[...topics].sort((a, b) => 
                   (b.timestamp || "").localeCompare(a.timestamp || "")
                 ).map((topic, i) => (
-                  <div key={i} className="relative">
+                  <div key={topic.item_id ?? i} className="relative">
                     <div className={`absolute -left-[18px] top-1 w-2.5 h-2.5 rounded-full border-2 border-card rtl:left-auto rtl:-right-[18px]`}
                       style={{
                         backgroundColor: normSeverity(topic.severity) === "critical" ? "hsl(var(--severity-critical))" :
@@ -114,12 +146,36 @@ export const HotTopicsTimeline = () => {
                           "hsl(var(--severity-verified))"
                       }}
                     />
-                    <h4 className="text-sm font-semibold leading-tight">{topic.title}</h4>
+                    {topic.url ? (
+                      <a
+                        href={topic.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-sm font-semibold leading-tight hover:underline"
+                      >
+                        {topic.title}
+                      </a>
+                    ) : (
+                      <h4 className="text-sm font-semibold leading-tight">{topic.title}</h4>
+                    )}
                     <p className="text-xs text-muted-foreground mt-0.5">{topic.summary}</p>
-                    <div className="flex items-center gap-2 mt-1">
+                    {topic.significance && (
+                      <p className="text-[11px] text-foreground/80 mt-1 italic">{topic.significance}</p>
+                    )}
+                    <div className="flex items-center gap-2 mt-1 flex-wrap">
                       <span className={`severity-badge severity-${normSeverity(topic.severity)}`}>{t(`severity.${normSeverity(topic.severity)}`)}</span>
+                      {topic.event_type && (
+                        <span className="text-[9px] font-mono uppercase text-muted-foreground/70">
+                          {topic.event_type.replace(/_/g, " ")}
+                        </span>
+                      )}
                       {topic.source && (
                         <span className="text-[10px] font-mono text-muted-foreground">{topic.source}</span>
+                      )}
+                      {/* The stored row id, so any entry on this timeline can be
+                          traced back to the exact item it came from. */}
+                      {topic.item_id && (
+                        <span className="text-[9px] font-mono text-muted-foreground/40">#{topic.item_id}</span>
                       )}
                       <span className="text-[9px] font-mono text-muted-foreground/50 ml-auto">{formatLocalDate(topic.timestamp)}</span>
                     </div>

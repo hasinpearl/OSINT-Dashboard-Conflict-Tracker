@@ -16,6 +16,12 @@ const PROTECTED_KEYS = new Set([
   "left_label", "center_label", "right_label",
   "biasLeftLabel", "biasRightLabel", "biasCenterLabel",
   "timestamp", "last_updated", "cached_at", "url",
+  // Identifiers and provenance. An id or a model name run through a translator
+  // stops matching the stored row it points at, which breaks the audit trail
+  // the timeline exists to provide.
+  "item_id", "message_id", "id", "event_type", "selected_by", "assessed_by",
+  "outlets_present", "outlets_by_bloc", "matching_in_store", "returned",
+  "breaking", "candidates_considered", "informational_excluded",
 ]);
 
 type Path = (string | number)[];

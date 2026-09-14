@@ -29,6 +29,7 @@ const translations: Record<string, Record<Language, string>> = {
 
   "telegram.title": { en: "Telegram Channels", ar: "قنوات تيليغرام" },
   "telegram.sources": { en: "SOURCES", ar: "مصادر" },
+  "telegram.messages": { en: "MSGS", ar: "رسائل" },
   "telegram.offline": { en: "FEED OFFLINE", ar: "التغذية غير متصلة" },
   "telegram.error": { en: "Unable to fetch Telegram data", ar: "تعذر جلب بيانات تيليغرام" },
   "telegram.noMessages": { en: "NO MESSAGES", ar: "لا توجد رسائل" },
@@ -45,11 +46,20 @@ const translations: Record<string, Record<Language, string>> = {
   "bias.left": { en: "LEFT", ar: "يسار" },
   "bias.center": { en: "CENTER", ar: "وسط" },
   "bias.right": { en: "RIGHT", ar: "يمين" },
+  "bias.noCoverageThisSide": {
+    en: "No report in this window carried this side's narrative.",
+    ar: "لم يحمل أي تقرير في هذه الفترة سردية هذا الطرف.",
+  },
+  "bias.outletsInWindow": { en: "OUTLETS IN WINDOW", ar: "المنافذ في هذه الفترة" },
   "bias.sources": { en: "sources", ar: "مصادر" },
 
   "topics.title": { en: "Major Developments", ar: "التطورات الرئيسية" },
   "topics.subtitle": { en: "TIMELINE", ar: "الجدول الزمني" },
   "topics.offline": { en: "OFFLINE", ar: "غير متصل" },
+  "topics.quietWindow": {
+    en: "Nothing in the window materially changed the situation. Candidates / informational excluded:",
+    ar: "لا شيء في هذه الفترة غيّر الموقف جوهرياً. المرشحون / المستبعد كمعلومات:",
+  },
   "topics.mentions": { en: "mentions", ar: "إشارات" },
 
   "osint.title": { en: "OSINT Feed", ar: "تغذية الاستخبارات المفتوحة" },

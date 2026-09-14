@@ -4,10 +4,13 @@ import { shouldForceRefresh } from "@/lib/freshness";
 import { useConflictFilter } from "@/contexts/ConflictFilterContext";
 
 export interface NewsStory {
+  item_id?: string;
   headline: string;
   summary: string;
   source: string;
   severity: "critical" | "high" | "developing" | "verified" | "info";
+  /** The classifier's own breaking flag, from items.is_breaking. */
+  breaking?: boolean;
   timestamp: string;
   url?: string;
 }
