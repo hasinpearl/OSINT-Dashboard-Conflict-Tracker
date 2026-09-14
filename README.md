@@ -153,7 +153,7 @@ never waits on an upstream fetch and never depends on a scrape succeeding at tha
 
 Collection does not depend on that container existing. On start the API waits
 `WORKERS_IN_API_GRACE_SECONDS` (default 90) for a worker heartbeat in `source_status`; if
-none appears it runs the same collector loops in-process, so an api-only deployment still
+none appears it runs the same collector loops itself, so an api-only deployment still
 ingests. The logs always name the path taken, either `standalone worker detected, not
 starting in-process collectors` or `no worker heartbeat after 90s, starting collectors
 in-process`. Two guards stop a double run: the workers entrypoint never runs the API's
@@ -162,6 +162,23 @@ process per database can hold, so even two API containers cannot both collect. I
 container starts later, the in-process copy sees its heartbeat, stops its loops, and drops the
 lease. Setting `WORKERS_IN_API=false` on the `workers` service in `docker-compose.yml` is
 worth adding as a third, explicit guard.
+
+Those collectors run in a **separate child process**, never in the API's event loop. Node
+exits the process on an unhandled rejection, so while collection lived inside the API a single
+rejection in one feed loop killed the API and every `/api/*` route answered 502. Now the
+collector child is spawned and supervised: if it dies for any reason the supervisor logs the
+exit code plus the last lines of its stderr and restarts it with exponential backoff
+(`RESTART_BASE_SECONDS` 2s, doubling, capped at `RESTART_MAX_SECONDS` 300s; the counter
+resets once a child stays up `HEALTHY_UPTIME_SECONDS`). The API itself also installs
+`unhandledRejection` and `uncaughtException` handlers that log with a request id and stack and
+deliberately do not exit: a dashboard whose collectors are broken is degraded, a dashboard
+answering 502 is dead.
+
+`GET /api/sources` reports the supervisor under `collector_supervisor` (state, `child_alive`,
+`child_pid`, restart count, last exit code/signal, and the supervisor's own heartbeat age), so
+a stale feed can be told apart from no collector process at all. `COLLECTOR_CRASH_AFTER_SECONDS`
+makes the child raise an unhandled rejection on purpose after N seconds; it exists for
+verifying the supervisor and should stay unset everywhere else.
 
 Port publishing lives in `docker-compose.override.yml` (local runs only). On Coolify the override file is not loaded and no host port is bound. Point the application's domain at the `web` service (port 80); Coolify's reverse proxy routes to the container directly, so it can never collide with ports already allocated on the host.
 

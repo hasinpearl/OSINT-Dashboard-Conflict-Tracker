@@ -16,8 +16,34 @@ import { enhancedOnError } from "./errors";
 import { eventsRoute, eventsPinsRoute, statsRoute } from "./routes/events";
 import { sourcesRoute } from "./routes/sources";
 import { bootstrapCollectors } from "./workers/bootstrap";
+import { generateRequestId } from "./errors";
 
 const app = new Hono();
+
+// Node's default on an unhandled rejection is to exit, which is how a single
+// rejection in a collector loop turned every /api/* route into a 502. The
+// collectors are out of this process now, but the API must survive its own
+// stray rejections too: a dashboard with broken collectors is degraded, a
+// dashboard answering 502 is dead, and degraded is always the better of the
+// two. Nothing here exits.
+function logFatal(kind: string, err: unknown): void {
+  const detail =
+    err instanceof Error
+      ? { error_message: err.message, stack: err.stack }
+      : { error_message: String(err) };
+  console.error(
+    JSON.stringify({
+      error_code: kind,
+      request_id: generateRequestId(),
+      retryable: false,
+      survived: true,
+      ...detail,
+    }),
+  );
+}
+
+process.on("unhandledRejection", (reason) => logFatal("unhandled_rejection", reason));
+process.on("uncaughtException", (err) => logFatal("uncaught_exception", err));
 
 app.onError(enhancedOnError);
 

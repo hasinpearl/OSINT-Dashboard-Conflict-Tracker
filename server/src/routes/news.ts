@@ -16,6 +16,10 @@ import {
 const CACHE_KEY_BASE = "firecrawl-news";
 const PANEL = "news-feed";
 
+// Named so the cache layer can tell an empty answer from a real one. Caching
+// "no stories" is what pinned the breaking bar empty against a full database.
+const LIST_FIELD = "stories";
+
 //TUNE: Control the (news panel size). Stories returned per panel load.
 const MAX_STORIES = 30;
 
@@ -28,13 +32,21 @@ export async function newsRoute(c: Context) {
   const config = getConflictConfig(readConflict(body));
   const CACHE_KEY = `${CACHE_KEY_BASE}:${config.key}`;
 
-  const cached = await getCached(CACHE_KEY, forceRefresh ? FORCE_MIN_AGE_MS : CACHE_TTL_MS);
+  const cached = await getCached(
+    CACHE_KEY,
+    forceRefresh ? FORCE_MIN_AGE_MS : CACHE_TTL_MS,
+    LIST_FIELD,
+  );
   if (cached) {
     logCacheHit(PANEL, "database");
     return c.json(cached);
   }
 
   try {
+    // Newest first, every severity, no age bound. This list is shared by the
+    // news panel and the breaking ticker, so it must stay the full recent feed:
+    // the ticker ranks it into its own tiers client-side rather than have this
+    // route narrow what the panel sees.
     const rows = await fetchItems({
       conflict: config.key,
       source: "rss",
@@ -52,7 +64,7 @@ export async function newsRoute(c: Context) {
     }));
 
     const result = { stories };
-    await setCache(CACHE_KEY, result);
+    await setCache(CACHE_KEY, result, LIST_FIELD);
     return c.json(result);
   } catch (e) {
     console.error("firecrawl-news read failed:", e instanceof Error ? e.message : e);

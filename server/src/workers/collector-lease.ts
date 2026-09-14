@@ -9,6 +9,11 @@ import { pool } from "../db";
 //TUNE: Control the (collector lease key). Advisory lock id that serialises collection across every process on one database.
 const COLLECTOR_LOCK_KEY = 728104;
 
+// A supervised collector child that cannot get the lease has to say why with
+// its exit status, otherwise its supervisor reads a clean exit as a crash and
+// restarts it against a healthy lease holder every couple of seconds.
+export const LEASE_UNAVAILABLE_EXIT_CODE = 75;
+
 let held: { release: () => Promise<void> } | null = null;
 
 export function leaseHeld(): boolean {

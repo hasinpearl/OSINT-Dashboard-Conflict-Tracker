@@ -91,10 +91,14 @@ const translations: Record<string, Record<Language, string>> = {
   },
 
   "ticker.breaking": { en: "BREAKING", ar: "عاجل" },
-  "ticker.empty": { en: "NO BREAKING ITEMS", ar: "لا أخبار عاجلة" },
+  // A breaking ticker may never announce that nothing is breaking: it is a
+  // claim about the world, and it hid real faults behind a calm message. The
+  // only no-rows state left says the store itself is empty and points at the
+  // diagnostic endpoint.
+  "ticker.awaitingCollection": { en: "AWAITING FIRST COLLECTION", ar: "في انتظار أول عملية جمع" },
   "ticker.emptyHint": {
-    en: "The ticker is live. Nothing in store is flagged breaking right now.",
-    ar: "الشريط يعمل. لا يوجد حاليًا ما هو مصنف كخبر عاجل.",
+    en: "No items have been collected into this database yet. Check /api/sources for collector status.",
+    ar: "لم يُجمع أي عنصر في قاعدة البيانات هذه بعد. راجع ‎/api/sources لحالة أدوات الجمع.",
   },
   "ticker.offline": { en: "TICKER OFFLINE", ar: "الشريط غير متصل" },
 

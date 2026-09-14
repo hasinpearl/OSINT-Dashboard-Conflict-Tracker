@@ -18,6 +18,9 @@ import {
 const CACHE_KEY_BASE = "ai-summarize";
 const PANEL = "hot-topics";
 
+// Named so the cache layer never pins an empty answer over a filling database.
+const LIST_FIELD = "topics";
+
 //TUNE: Control the (timeline size). TIMELINE_MAX_EVENTS=topics returned per response.
 const MAX_EVENTS = Number(envKey("TIMELINE_MAX_EVENTS") || 40);
 
@@ -114,7 +117,11 @@ export async function hotTopicsRoute(c: Context) {
   const config = getConflictConfig(readConflict(body));
   const CACHE_KEY = `${CACHE_KEY_BASE}:${config.key}`;
 
-  const cached = await getCached(CACHE_KEY, forceRefresh ? FORCE_MIN_AGE_MS : CACHE_TTL_MS);
+  const cached = await getCached(
+    CACHE_KEY,
+    forceRefresh ? FORCE_MIN_AGE_MS : CACHE_TTL_MS,
+    LIST_FIELD,
+  );
   if (cached) {
     logCacheHit(PANEL, "database");
     return c.json(cached);
@@ -152,7 +159,7 @@ export async function hotTopicsRoute(c: Context) {
       }));
 
     const result = { topics };
-    await setCache(CACHE_KEY, result);
+    await setCache(CACHE_KEY, result, LIST_FIELD);
     return c.json(result);
   } catch (e) {
     console.error("ai-summarize read failed:", e instanceof Error ? e.message : e);

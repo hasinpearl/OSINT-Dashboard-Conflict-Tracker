@@ -9,8 +9,28 @@ import { JSDOM } from "jsdom";
 import { collectorsShouldStop, sleepUnlessStopped } from "./collector-stop";
 
 //TUNE: Control the (telegram channels). TG_PREVIEW_CHANNELS=comma separated public channel usernames.
-const TG_PREVIEW_CHANNELS = envKey("TG_PREVIEW_CHANNELS")?.split(",").map(c => c.trim()).filter(c => c) || 
-  ["monitor_the_situation", "intelslava", "GeoPWatch", "rnintel", "CIG_telegram", "idkunim_il", "OSINTdefender", "BellumActaNews", "RocketAlert"];
+const DEFAULT_TG_PREVIEW_CHANNELS = [
+  "monitor_the_situation",
+  "intelslava",
+  "GeoPWatch",
+  "rnintel",
+  "CIG_telegram",
+  "idkunim_il",
+  "OSINTdefender",
+  "BellumActaNews",
+  "RocketAlert",
+];
+// An empty env var must fall back to the defaults. A bare `|| default` does not:
+// "".split(",") filters down to [], and [] is truthy, so the default never applies.
+// docker-compose passes these as empty strings when unset, which is exactly that case.
+const CONFIGURED_TG_PREVIEW_CHANNELS = envKey("TG_PREVIEW_CHANNELS")
+  ?.split(",")
+  .map((c) => c.trim())
+  .filter((c) => c) ?? [];
+const TG_PREVIEW_CHANNELS =
+  CONFIGURED_TG_PREVIEW_CHANNELS.length > 0
+    ? CONFIGURED_TG_PREVIEW_CHANNELS
+    : DEFAULT_TG_PREVIEW_CHANNELS;
 //TUNE: Control the (preview poll rate). TG_PREVIEW_POLL_SECONDS=seconds between polling rounds.
 const TG_PREVIEW_POLL_SECONDS = parseInt(envKey("TG_PREVIEW_POLL_SECONDS") || "120");
 //TUNE: Control the (backfill depth). TG_PREVIEW_MAX_PAGES=history pages walked per channel per run, 20 posts each.

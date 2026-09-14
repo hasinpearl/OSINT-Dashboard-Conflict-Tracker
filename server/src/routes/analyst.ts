@@ -16,6 +16,9 @@ import {
 const CACHE_KEY_BASE = "analyst-curated";
 const PANEL = "analyst";
 
+// Named so the cache layer never pins an empty answer over a filling database.
+const LIST_FIELD = "comments";
+
 //TUNE: Control the (analyst panel size). Attributed pieces returned per panel load.
 const MAX_COMMENTS = 9;
 
@@ -44,7 +47,11 @@ export async function analystRoute(c: Context) {
   const config = getConflictConfig(readConflict(body));
   const CACHE_KEY = `${CACHE_KEY_BASE}:${config.key}`;
 
-  const cached = await getCached(CACHE_KEY, forceRefresh ? FORCE_MIN_AGE_MS : CACHE_TTL_MS);
+  const cached = await getCached(
+    CACHE_KEY,
+    forceRefresh ? FORCE_MIN_AGE_MS : CACHE_TTL_MS,
+    LIST_FIELD,
+  );
   if (cached) {
     logCacheHit(PANEL, "database");
     return c.json(cached);
@@ -101,7 +108,7 @@ export async function analystRoute(c: Context) {
     }
 
     const result = { comments };
-    await setCache(CACHE_KEY, result);
+    await setCache(CACHE_KEY, result, LIST_FIELD);
     return c.json(result);
   } catch (e) {
     console.error("analyst read failed:", e instanceof Error ? e.message : e);

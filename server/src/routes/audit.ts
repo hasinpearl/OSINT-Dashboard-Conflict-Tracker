@@ -63,6 +63,7 @@ export async function auditRefreshRoute(c: Context) {
   const rows = await getCacheRows(candidateKeys);
 
   const audited: string[] = [];
+  const toDeleteAfterAudit: string[] = [];
   let itemsBefore = 0;
   let itemsAfter = 0;
 
@@ -73,6 +74,15 @@ export async function auditRefreshRoute(c: Context) {
     itemsBefore += result.before;
     itemsAfter += result.after;
     audited.push(row.function_name);
+
+    // Cleaning every item out of an entry would leave a cached claim that the
+    // store is empty, which the panels would then serve instead of re-reading
+    // the database. Dropping the row is the honest outcome: the next request
+    // rebuilds it from the items table.
+    if (result.after === 0) {
+      toDeleteAfterAudit.push(row.function_name);
+      continue;
+    }
 
     const originalCachedAt = row.response_data?.cached_at;
     const newPayload =
@@ -93,10 +103,15 @@ export async function auditRefreshRoute(c: Context) {
     }
   }
 
+  if (toDeleteAfterAudit.length > 0) {
+    await deleteCacheKeys(toDeleteAfterAudit);
+  }
+
   const allRows = await getCacheRows();
 
   let deletedStale = 0;
   let deletedOrphaned = 0;
+  const deletedEmptied = toDeleteAfterAudit.length;
   const cutoff = Date.now() - 24 * 60 * 60 * 1000;
 
   const toDelete: string[] = [];
@@ -123,6 +138,7 @@ export async function auditRefreshRoute(c: Context) {
     cache_cleaned: {
       deleted_stale: deletedStale,
       deleted_orphaned: deletedOrphaned,
+      deleted_emptied: deletedEmptied,
     },
   });
 }

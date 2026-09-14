@@ -3,7 +3,15 @@ import { useNewsStories, type NewsStory } from "@/hooks/usePanelData";
 import { useTranslatedData } from "@/hooks/useTranslatedData";
 import { useLanguage } from "@/i18n/LanguageContext";
 import { normSeverity } from "@/utils/severity";
+import { resolveTier } from "@/utils/tickerTiers";
 import { useSourceStatus } from "@/hooks/useSourceStatus";
+
+//TUNE: Control the (ticker minimum track length). Items the scroll track is padded to so it stays wider than the viewport.
+const MIN_TRACK_ITEMS = 6;
+
+//TUNE: Control the (ticker scroll pace). Seconds of scroll added per item, and the floor for a short list.
+const SECONDS_PER_ITEM = 7;
+const MIN_SCROLL_SECONDS = 30;
 
 // Pure consumer of the shared news query — zero additional API calls.
 export const BreakingNewsBar = () => {
@@ -14,13 +22,15 @@ export const BreakingNewsBar = () => {
   const { data: status } = useSourceStatus();
 
   const stories = translated?.stories ?? data?.stories ?? [];
+  const resolved = resolveTier(stories);
 
-  // Returning null here is what made the bar disappear, which is
-  // indistinguishable from the bar being broken. It now always renders and
-  // states which it is.
-  if (stories.length === 0) {
+  // Only a genuinely empty store reaches this branch, and what it says is
+  // diagnostic rather than reassuring: nothing has been collected yet, here is
+  // where to look. Returning null would be worse still, since a missing bar is
+  // indistinguishable from a broken one.
+  if (!resolved) {
     const failing = (status?.sources ?? []).filter((s) => s.source === "rss" && !s.ok);
-    const headline = error ? t("ticker.offline") : t("ticker.empty");
+    const headline = error ? t("ticker.offline") : t("ticker.awaitingCollection");
     const detail = error
       ? t("state.panelOfflineHint")
       : status && !status.workers_reported
@@ -38,17 +48,13 @@ export const BreakingNewsBar = () => {
     );
   }
 
-  const urgent = stories.filter((s) =>
-    ["critical", "high"].includes(normSeverity(s.severity)),
-  );
-  // Never render an empty bar — fall back to all stories.
-  const items = urgent.length > 0 ? urgent : stories;
+  const items = resolved.items;
 
   // Pad short lists so the track is always wider than the viewport.
   const padded: NewsStory[] = [...items];
-  while (padded.length < 6) padded.push(...items);
+  while (padded.length < MIN_TRACK_ITEMS) padded.push(...items);
 
-  const duration = Math.max(30, padded.length * 7);
+  const duration = Math.max(MIN_SCROLL_SECONDS, padded.length * SECONDS_PER_ITEM);
 
   const renderItems = (ariaHidden: boolean) => (
     <div className="inline-flex items-center" aria-hidden={ariaHidden}>

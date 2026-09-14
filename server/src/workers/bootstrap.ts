@@ -1,11 +1,17 @@
 import { pool } from "../db";
 import { envKey } from "../env";
-import { RUNTIME_HEARTBEAT_IDS, startCollectorLoops, stopCollectorLoops } from "./loops";
+import { RUNTIME_HEARTBEAT_IDS } from "./loops";
+import { startCollectorSupervisor, stopCollectorSupervisor } from "./supervisor";
 
 // Coolify deploys that never started the workers container left the dashboard
 // serving only pre-existing rows, with nothing in the logs to say so. The API
 // now collects by itself when nothing else is, so a single-container deploy
 // still ingests.
+//
+// It collects in a supervised child process, never in its own event loop. An
+// unhandled rejection in a collector loop used to exit the API and turn every
+// /api/* route into a 502; now it only kills the child, which the supervisor
+// restarts.
 
 //TUNE: Control the (in-process collection). WORKERS_IN_API=run the collectors inside the API when no worker heartbeat is seen. Set false in the standalone workers service.
 const WORKERS_IN_API = envKey("WORKERS_IN_API").toLowerCase() !== "false";
@@ -71,7 +77,7 @@ async function probeWorker(scope: "any" | "standalone-only"): Promise<Probe> {
 }
 
 // A workers container that comes up later writes its runtime heartbeat, and this
-// watcher is what makes the in-process copy notice and stand down.
+// watcher is what makes the supervised child stand down.
 function watchForStandaloneTakeover(): void {
   const timer = setInterval(() => {
     void (async () => {
@@ -79,9 +85,9 @@ function watchForStandaloneTakeover(): void {
         const probe = await probeWorker("standalone-only");
         if (!probe.alive) return;
         console.log(
-          `[collectors] standalone worker took over (heartbeat ${probe.age}s old), stopping in-process collectors`,
+          `[collectors] standalone worker took over (heartbeat ${probe.age}s old), stopping the supervised collector child`,
         );
-        stopCollectorLoops();
+        stopCollectorSupervisor();
         clearInterval(timer);
       } catch (e) {
         console.error(
@@ -94,15 +100,11 @@ function watchForStandaloneTakeover(): void {
   timer.unref?.();
 }
 
-async function startInApi(): Promise<void> {
-  const started = await startCollectorLoops("in-api");
-  if (!started) {
-    console.log(
-      "[collectors] another process holds the collector lease, not starting in-process collectors",
-    );
-    return;
-  }
-  console.log("[collectors] in-process collectors started");
+// The lease is no longer checked here. The child acquires it in its own process
+// and exits with a distinct code when another process holds it, which the
+// supervisor reads and backs off on instead of respawning into a busy lease.
+function startInApi(): void {
+  startCollectorSupervisor();
   watchForStandaloneTakeover();
 }
 
@@ -127,7 +129,7 @@ export async function bootstrapCollectors(): Promise<void> {
       "[collectors] heartbeat probe failed, starting collectors in-process anyway:",
       e instanceof Error ? e.message : e,
     );
-    await startInApi();
+    startInApi();
     return;
   }
 
@@ -141,5 +143,5 @@ export async function bootstrapCollectors(): Promise<void> {
   console.log(
     `[collectors] no worker heartbeat after ${WORKERS_IN_API_GRACE_SECONDS}s, starting collectors in-process`,
   );
-  await startInApi();
+  startInApi();
 }

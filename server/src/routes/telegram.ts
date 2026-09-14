@@ -9,6 +9,9 @@ import { deriveSummary, fetchItems, isoOrNull, telegramMessageId } from "../serv
 const CACHE_KEY_BASE = "telegram-feed";
 const PANEL = "telegram";
 
+// Named so the cache layer never pins an empty answer over a filling database.
+const LIST_FIELD = "messages";
+
 //TUNE: Control the (telegram panel size). Messages returned per panel load.
 const MAX_MESSAGES = 40;
 
@@ -21,7 +24,11 @@ export async function telegramRoute(c: Context) {
   const config = getConflictConfig(readConflict(body));
   const CACHE_KEY = `${CACHE_KEY_BASE}:${config.key}`;
 
-  const cached = await getCached(CACHE_KEY, forceRefresh ? FORCE_MIN_AGE_MS : CACHE_TTL_MS);
+  const cached = await getCached(
+    CACHE_KEY,
+    forceRefresh ? FORCE_MIN_AGE_MS : CACHE_TTL_MS,
+    LIST_FIELD,
+  );
   if (cached) {
     logCacheHit(PANEL, "database");
     return c.json(cached);
@@ -44,7 +51,7 @@ export async function telegramRoute(c: Context) {
     }));
 
     const result = { messages };
-    await setCache(CACHE_KEY, result);
+    await setCache(CACHE_KEY, result, LIST_FIELD);
     return c.json(result);
   } catch (e) {
     console.error("telegram-feed read failed:", e instanceof Error ? e.message : e);

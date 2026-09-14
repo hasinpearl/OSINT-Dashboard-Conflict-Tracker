@@ -27,6 +27,7 @@ export const RUNTIME_HEARTBEAT_SECONDS = 30;
 
 let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
 let running = false;
+let finished: Promise<void> | null = null;
 
 async function writeRuntimeHeartbeat(runtime: CollectorRuntime): Promise<void> {
   await sourceStatusUpdate({
@@ -43,6 +44,13 @@ async function writeRuntimeHeartbeat(runtime: CollectorRuntime): Promise<void> {
 
 export function collectorsRunning(): boolean {
   return running;
+}
+
+// Resolves when every loop has settled. The collector process awaits this so a
+// set of loops that all quietly returned ends the process instead of leaving it
+// idling with nothing collecting and nothing in the logs.
+export function collectorsFinished(): Promise<void> {
+  return finished ?? Promise.resolve();
 }
 
 // Returns false when another process already holds the lease, which is the
@@ -83,6 +91,8 @@ export async function startCollectorLoops(runtime: CollectorRuntime): Promise<bo
       heartbeatTimer = null;
       void releaseCollectorLease();
     });
+
+  finished = Promise.allSettled(loops).then(() => undefined);
 
   return true;
 }

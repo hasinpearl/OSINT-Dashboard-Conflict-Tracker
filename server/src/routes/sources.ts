@@ -1,6 +1,7 @@
 import type { Context } from "hono";
 import { pool } from "../db";
 import { AppError } from "../errors";
+import { supervisorStatus } from "../workers/supervisor";
 
 // Worker health. When every panel is empty this is the endpoint that says
 // whether the workers ever ran, which sources answered, and what the failures
@@ -73,6 +74,10 @@ export async function sourcesRoute(c: Context) {
       failing: sources.filter((s) => !s.ok).length,
       workers_reported: sources.length > 0,
       stale_after_seconds: STALE_AFTER_SECONDS,
+      // Additive. Source rows say what the collectors last managed to fetch;
+      // this says whether the collector process is even alive right now, which
+      // is the difference between a stale feed and no collector at all.
+      collector_supervisor: supervisorStatus(),
     });
   } catch (e) {
     console.error("sources read failed:", e instanceof Error ? e.message : e);

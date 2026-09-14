@@ -16,6 +16,9 @@ import {
 const CACHE_KEY_BASE = "osint";
 const PANEL = "osint";
 
+// Named so the cache layer never pins an empty answer over a filling database.
+const LIST_FIELD = "items";
+
 //TUNE: Control the (osint panel size). Items returned per panel load.
 const MAX_ITEMS = 12;
 
@@ -28,7 +31,11 @@ export async function osintRoute(c: Context) {
   const config = getConflictConfig(readConflict(body));
   const CACHE_KEY = `${CACHE_KEY_BASE}:${config.key}`;
 
-  const cached = await getCached(CACHE_KEY, forceRefresh ? FORCE_MIN_AGE_MS : CACHE_TTL_MS);
+  const cached = await getCached(
+    CACHE_KEY,
+    forceRefresh ? FORCE_MIN_AGE_MS : CACHE_TTL_MS,
+    LIST_FIELD,
+  );
   if (cached) {
     logCacheHit(PANEL, "database");
     return c.json(cached);
@@ -64,7 +71,7 @@ export async function osintRoute(c: Context) {
     }));
 
     const result = { items };
-    await setCache(CACHE_KEY, result);
+    await setCache(CACHE_KEY, result, LIST_FIELD);
     return c.json(result);
   } catch (e) {
     console.error("osint read failed:", e instanceof Error ? e.message : e);
