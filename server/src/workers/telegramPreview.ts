@@ -8,19 +8,17 @@ import http from "http";
 import { JSDOM } from "jsdom";
 import { collectorsShouldStop, sleepUnlessStopped } from "./collector-stop";
 import { describeError, truncateForLog } from "./describe-error";
+import { CURATED_CHANNELS } from "../routes/telegram";
 
 //TUNE: Control the (telegram channels). TG_PREVIEW_CHANNELS=comma separated public channel usernames.
-const DEFAULT_TG_PREVIEW_CHANNELS = [
-  "monitor_the_situation",
-  "intelslava",
-  "GeoPWatch",
-  "rnintel",
-  "CIG_telegram",
-  "idkunim_il",
-  "OSINTdefender",
-  "BellumActaNews",
-  "RocketAlert",
-];
+//
+// The default IS Hessa's curated roster, imported from the panel route rather
+// than restated here. Two independent lists is how the panel came to label
+// eleven channels while the collector ingested a different nine: every message
+// from the ingested set was then dropped by a legend chip that did not exist,
+// and every chip on the legend named a channel with no data behind it. One
+// exported constant makes that drift impossible.
+const DEFAULT_TG_PREVIEW_CHANNELS = [...CURATED_CHANNELS];
 // An empty env var must fall back to the defaults. A bare `|| default` does not:
 // "".split(",") filters down to [], and [] is truthy, so the default never applies.
 // docker-compose passes these as empty strings when unset, which is exactly that case.

@@ -4,22 +4,75 @@ import { logCacheHit } from "../costs";
 import { getConflictConfig, readConflict } from "../conflicts";
 import { readForceRefresh, readJsonBody } from "../request";
 import { AppError } from "../errors";
-import { countItems, deriveSummary, fetchItems, isoOrNull, telegramMessageId } from "../serving";
+import { shapeTelegramPosts, toCandidates } from "../editorial";
+import { countItems, fetchItems, isoOrNull, telegramMessageId } from "../serving";
 
 const CACHE_KEY_BASE = "telegram-feed";
 const PANEL = "telegram";
 
+// Hessa's curated channel roster, restored verbatim from 300b1cc~1 in this
+// file's own CHANNELS array: same eleven channels, same order. It is the
+// panel's legend and the collector's default channel set, so the list the
+// dashboard labels and the list the backend ingests cannot drift apart.
+//
+// Order is Hessa's and is not sorted here. The frontend renders its chips in
+// this order, so re-sorting would silently reorder her legend.
+//
+// Exported for the collector (workers/telegramPreview.ts) and for the panel
+// response, which reports the roster so the legend can render a channel that
+// is quiet right now instead of dropping its chip.
+//TUNE: Control the (curated telegram roster). Hessa's channel list: the panel legend and the collector's default channel set.
+export const CURATED_CHANNELS = [
+  "middleeasteye",
+  "iranintl",
+  "geopolitics_prime",
+  "bricsnews",
+  "megatron_ron",
+  "DDGeopolitics",
+  "thecradlemedia",
+  "warmonitors",
+  "CIG_telegram",
+  "monitor_the_situation",
+  "ukr_leaks_eng",
+] as const;
+
 // Named so the cache layer never pins an empty answer over a filling database.
 const LIST_FIELD = "messages";
 
-// The collector holds over nine hundred posts, and the panel used to show one
-// of them. Forty was never the reason: the conflict filter was, so it is fixed
-// in serving.ts and the panel size is raised to something worth scrolling.
 //TUNE: Control the (telegram panel size). Messages returned per panel load.
-const MAX_MESSAGES = 200;
+const MAX_MESSAGES = 40;
 
-//TUNE: Control the (telegram cache ttl). How long a served page stays reusable before the DB is read again.
+//TUNE: Control the (telegram candidate pool). Stored posts offered to the editorial pass.
+const CANDIDATE_LIMIT = 80;
+
+//TUNE: Control the (telegram window). Hours of stored posts the feed is built from.
+const WINDOW_HOURS = 48;
+
+//TUNE: Control the (telegram cache ttl). How long a served page stays reusable before it is recomputed.
 const CACHE_TTL_MS = 2 * 60 * 1000;
+
+interface TelegramMessage {
+  item_id: string;
+  channel: string;
+  text: string;
+  timestamp: string | null;
+  message_id: number;
+  url?: string;
+  conflicts: string[];
+}
+
+// Newest first by the post's own time, id descending as the tiebreak. Read off
+// the stored row, so a refresh updates the list rather than reshuffling it.
+function newestFirst(a: TelegramMessage, b: TelegramMessage): number {
+  const at = a.timestamp ?? "";
+  const bt = b.timestamp ?? "";
+  if (at !== bt) {
+    if (!at) return 1;
+    if (!bt) return -1;
+    return bt.localeCompare(at);
+  }
+  return Number(b.item_id) - Number(a.item_id);
+}
 
 export async function telegramRoute(c: Context) {
   const body = await readJsonBody(c);
@@ -38,35 +91,98 @@ export async function telegramRoute(c: Context) {
   }
 
   try {
+    // Candidates are the stored posts the MTProto and preview collectors have
+    // already written, which is what makes this panel near-live: a post is
+    // servable as soon as a collector round lands it. The original panel
+    // Firecrawl-scraped t.me/s/<channel> at request time, which was slow and
+    // empty whenever a scrape failed. That path is deliberately not restored.
     const rows = await fetchItems({
       conflict: config.key,
-      source: "telegram",
-      limit: MAX_MESSAGES,
+      sourceTypes: ["telegram_channel"],
+      limit: CANDIDATE_LIMIT,
       requireText: true,
+      sinceHours: WINDOW_HOURS,
     });
 
     // The panel says how many messages match the tab in the whole store, not
-    // just how many fit on a page. A feed showing 200 of 383 and a feed holding
-    // exactly 200 are different situations and the panel has to be able to tell
-    // the reader which one it is in.
+    // just how many fit on a page. A feed showing 40 of 383 and a feed holding
+    // exactly 40 are different situations and the panel has to be able to tell
+    // the reader which one it is in. The count is on the same audience as the
+    // page, so it counts what the panel could show, not what the store holds.
     const matching = await countItems({
       conflict: config.key,
-      source: "telegram",
+      sourceTypes: ["telegram_channel"],
       requireText: true,
     });
 
-    const messages = rows.map((row) => ({
-      channel: row.source_uid ?? row.source,
-      text: deriveSummary(row),
-      timestamp: isoOrNull(row.published_at),
-      message_id: telegramMessageId(row),
-      url: row.url ?? undefined,
-      // The row's own stored assignment, so what a tab returns can be checked
-      // against what the database holds without a second query.
-      conflicts: row.conflicts,
-    }));
+    if (rows.length === 0) {
+      return c.json({
+        messages: [],
+        matching_in_store: matching,
+        returned: 0,
+        candidates_considered: 0,
+        // Carried on the empty path too: an empty tab still has a roster, and
+        // dropping it here would blank the legend exactly when the reader most
+        // needs to see which channels were meant to be feeding it.
+        channels: CURATED_CHANNELS,
+      });
+    }
 
-    const result = { messages, matching_in_store: matching, returned: messages.length };
+    // The restored model pass. Its conflict filter is the part that mattered in
+    // the original: posts about another theatre or about nothing relevant are
+    // excluded rather than rendered, and the post text comes back as plain
+    // sentences with the emoji, flags, severity dots, subscribe lines and
+    // Admin Note annotations stripped. Serving raw content is exactly the
+    // regression this repairs.
+    const shaping = await shapeTelegramPosts(
+      PANEL,
+      config.label,
+      config.key,
+      config.searchTerms,
+      toCandidates(rows),
+      MAX_MESSAGES,
+    );
+
+    if (shaping.rejectedIds.length > 0) {
+      console.warn(
+        `telegram-feed(${config.key}): dropped ${shaping.rejectedIds.length} ids not present in the candidate set: ${shaping.rejectedIds.slice(0, 8).join(", ")}`,
+      );
+    }
+
+    const messages: TelegramMessage[] = shaping.entries
+      .map(({ candidate, headline }) => ({
+        item_id: candidate.row.id,
+        // Channel, message id, timestamp and url are read off the stored row.
+        // The original parsed all four out of scraped markdown, which is how an
+        // invented timestamp reached the store in the first place.
+        channel: candidate.row.source_uid ?? candidate.row.source,
+        text: headline,
+        timestamp: isoOrNull(candidate.row.published_at),
+        message_id: telegramMessageId(candidate.row),
+        url: candidate.row.url ?? undefined,
+        // The row's own stored assignment, so what a tab returns can be checked
+        // against what the database holds without a second query.
+        conflicts: candidate.row.conflicts,
+      }))
+      .sort(newestFirst)
+      .slice(0, MAX_MESSAGES);
+
+    console.log(
+      `telegram-feed(${config.key}): ${rows.length} candidates, ${shaping.returned} kept by ${shaping.modelUsed}, ${messages.length} shown, ${matching} match the tab in store`,
+    );
+
+    const result = {
+      messages,
+      matching_in_store: matching,
+      returned: messages.length,
+      candidates_considered: rows.length,
+      shaped_by: shaping.modelUsed,
+      // The curated roster, so the panel's legend is Hessa's list rather than
+      // whatever this page of messages happens to contain. A channel that is
+      // quiet in this window keeps its chip instead of vanishing from the
+      // legend, which is how the list came to look shorter than it is.
+      channels: CURATED_CHANNELS,
+    };
     await setCache(CACHE_KEY, result, LIST_FIELD);
     return c.json(result);
   } catch (e) {

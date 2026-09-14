@@ -1,6 +1,17 @@
 import { Context } from "hono";
 import { pool } from "../db";
 import { AppError } from "../errors"; // Assuming we have an AppError class
+import { backendOnlyCounts } from "../serving";
+
+// Rule 2, as a SQL fragment shared by every public read in this file. An item
+// assigned to no followed conflict, and anything the classifier marked
+// informational, is Hessa's backend reference material and must never be
+// returned to the dashboard by ANY route. These are GET endpoints that can be
+// curled directly, so the predicate belongs in the query, not in a caller.
+const DASHBOARD_AUDIENCE = `
+      AND cardinality(conflicts) > 0
+      AND event_type IS NOT NULL
+      AND event_type <> 'informational'`;
 
 /**
  * GET /api/events
@@ -46,6 +57,7 @@ export async function eventsRoute(c: Context) {
       raw
     FROM items
     WHERE noise = false
+      ${DASHBOARD_AUDIENCE}
   `;
   
   const params: any[] = [];
@@ -150,6 +162,7 @@ export async function eventsPinsRoute(c: Context) {
     FROM items
     WHERE primary_location IS NOT NULL
       AND noise = false
+      ${DASHBOARD_AUDIENCE}
   `;
   
   const params: any[] = [];
@@ -211,6 +224,7 @@ export async function statsRoute(c: Context) {
       severityResult,
       sourceResult,
       regionResult,
+      backendOnly,
     ] = await Promise.all([
       pool.query(
         `SELECT
@@ -218,6 +232,7 @@ export async function statsRoute(c: Context) {
            COUNT(*) FILTER (WHERE published_at >= NOW() - INTERVAL '1 hour') AS last_hour
          FROM items
          WHERE noise = false
+           ${DASHBOARD_AUDIENCE}
            ${windowClause}`,
         windowParams,
       ),
@@ -226,6 +241,7 @@ export async function statsRoute(c: Context) {
          FROM items 
          WHERE event_type IS NOT NULL 
            AND noise = false
+           ${DASHBOARD_AUDIENCE}
            ${windowClause}
          GROUP BY event_type 
          ORDER BY count DESC`,
@@ -236,6 +252,7 @@ export async function statsRoute(c: Context) {
          FROM items 
          WHERE severity IS NOT NULL 
            AND noise = false
+           ${DASHBOARD_AUDIENCE}
            ${windowClause}
          GROUP BY severity 
          ORDER BY count DESC`,
@@ -246,6 +263,7 @@ export async function statsRoute(c: Context) {
          FROM items 
          WHERE source IS NOT NULL 
            AND noise = false
+           ${DASHBOARD_AUDIENCE}
            ${windowClause}
          GROUP BY source 
          ORDER BY count DESC`,
@@ -256,12 +274,17 @@ export async function statsRoute(c: Context) {
          FROM items 
          WHERE primary_location IS NOT NULL 
            AND noise = false
+           ${DASHBOARD_AUDIENCE}
            ${windowClause}
          GROUP BY primary_location->>'region' 
          ORDER BY count DESC 
          LIMIT 10`,
         windowParams,
       ),
+      // Rule 2's audit half. The aggregates above count only what the
+      // dashboard may show, so this reports how much the store holds that the
+      // dashboard deliberately does not. It is counts, never content.
+      backendOnlyCounts(),
     ]);
 
     const totalEvents = parseInt(scalarResult.rows[0].total);
@@ -298,6 +321,9 @@ export async function statsRoute(c: Context) {
       by_severity: bySeverity,
       by_source: bySource,
       top_regions: topRegions,
+      // Held for Hessa in the backend and never served as content. Proof that
+      // Rule 2 hides these rows rather than deleting them.
+      backend_only: backendOnly,
       ...(windowHours ? { window_hours: windowHours } : {}),
     });
   } catch (error) {

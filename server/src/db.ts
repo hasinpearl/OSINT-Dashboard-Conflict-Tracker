@@ -175,6 +175,28 @@ CREATE TABLE IF NOT EXISTS collection_runs (
   PRIMARY KEY (panel, conflict)
 );
 
+-- Rule 5: the timeline is updated, not rebuilt. The editorial selection is
+-- persisted per conflict and keyed on the stored item it came from, so a later
+-- run updates the same entry instead of producing a fresh list. Without this
+-- the panel's membership was whatever the last model call happened to return,
+-- and an entry could vanish and reappear between loads while the development
+-- it described was still current.
+--
+-- item_id cascades: if the underlying item is ever deleted the development has
+-- no source left, and an entry with no stored row behind it is exactly what
+-- this panel must never show.
+CREATE TABLE IF NOT EXISTS timeline_selections (
+  conflict text NOT NULL,
+  item_id bigint NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+  significance text NOT NULL DEFAULT '',
+  first_selected_at timestamptz NOT NULL DEFAULT now(),
+  last_selected_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (conflict, item_id)
+);
+
+CREATE INDEX IF NOT EXISTS timeline_selections_conflict_idx
+  ON timeline_selections (conflict, last_selected_at DESC);
+
 CREATE TABLE IF NOT EXISTS source_status (
   id text PRIMARY KEY,
   source text NOT NULL,

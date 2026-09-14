@@ -1,7 +1,8 @@
 import type { Context } from "hono";
 import { pool } from "../db";
 import { AppError } from "../errors";
-import { conflictAssignmentCounts } from "../serving";
+import { backendOnlyCounts, conflictAssignmentCounts } from "../serving";
+import { sourceTypeOf } from "../sourceTypes";
 import { supervisorStatus } from "../workers/supervisor";
 
 // Worker health. When every panel is empty this is the endpoint that says
@@ -40,7 +41,7 @@ function isoOrNull(value: Date | null): string | null {
 
 export async function sourcesRoute(c: Context) {
   try {
-    const [{ rows }, assignment] = await Promise.all([
+    const [{ rows }, assignment, backendOnly] = await Promise.all([
       pool.query<SourceRow>(
         `SELECT id, source, label, ok, failures, last_ok, detail, updated_at
          FROM source_status
@@ -50,12 +51,16 @@ export async function sourcesRoute(c: Context) {
         [`${RUNTIME_MARKER_PREFIX}%`, MAX_SOURCES],
       ),
       conflictAssignmentCounts(),
+      backendOnlyCounts(),
     ]);
 
     const now = Date.now();
     const sources = rows.map((row) => ({
       id: row.id,
       source: row.source,
+      // Which panel this source feeds. Rule 1's mapping, reported so the
+      // taxonomy is inspectable rather than implied by a route's query.
+      source_type: sourceTypeOf(row.source),
       label: row.label,
       ok: row.ok,
       failures: row.failures,
@@ -87,6 +92,9 @@ export async function sourcesRoute(c: Context) {
       // conflict at all: it is the count that says whether the assigner is
       // actually reaching the corpus.
       conflict_assignment: assignment,
+      // Rule 2's audit view: how many rows the dashboard deliberately hides,
+      // proving they are still in the store rather than deleted. Counts only.
+      backend_only: backendOnly,
     });
   } catch (e) {
     console.error("sources read failed:", e instanceof Error ? e.message : e);

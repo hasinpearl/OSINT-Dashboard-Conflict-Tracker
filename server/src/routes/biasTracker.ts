@@ -120,7 +120,7 @@ async function analyzeOne(config: ConflictConfig): Promise<BiasData> {
 
   const rows = await fetchItems({
     conflict: config.key,
-    source: "rss",
+    sourceTypes: ["news_outlet"],
     limit: SAMPLE_LIMIT,
     requireText: true,
     sinceHours: WINDOW_HOURS,

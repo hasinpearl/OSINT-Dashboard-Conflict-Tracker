@@ -1,9 +1,25 @@
 import { pool } from "./db";
 import type { ConflictKey } from "./conflicts";
+import { sourcesForTypes, sourceTypeOf, type SourceType } from "./sourceTypes";
 
 // Panel serving layer. Every panel route reads the items table through here, so
 // the mapping from ingested rows onto the legacy response shapes lives in one
 // place. No upstream fetch, no model call, no api_cache origin.
+//
+// Two invariants are enforced HERE rather than in the routes, because a route
+// is one caller among several and the frontend is not a security boundary at
+// all: an endpoint can be curled directly.
+//
+// 1. Source isolation. Every query names the source types it is allowed to
+//    read and the SQL filters on them. sourceTypes is a required field, so a
+//    new call site cannot inherit "whatever the pool holds" by omission, which
+//    is exactly how one shared pool came to feed every panel.
+//
+// 2. Backend-only content. Rows assigned to no followed conflict, and rows the
+//    classifier marked informational, are reference material for the backend.
+//    The dashboard audience excludes both unconditionally. The predicate is
+//    additive and cannot be switched off by a caller: reaching them requires
+//    asking for the backend audience by name.
 
 //TUNE: Control the (title fallback length). Characters of content used as a title when the row has none.
 const TITLE_MAX_CHARS = 120;
@@ -144,23 +160,49 @@ export function eventTopic(row: ServingRow): string {
   return type.replace(/_/g, " ");
 }
 
+// The dashboard audience is what a public panel may return. The backend
+// audience is Hessa's own reference view: it adds the unassigned and
+// informational rows back, and only the audit route asks for it. There is no
+// third option and no way to widen the dashboard audience from a route.
+export type Audience = "dashboard" | "backend";
+
 export interface ItemQuery {
   conflict: ConflictKey;
   limit: number;
-  source?: "rss" | "telegram";
+  /**
+   * Source types this query may read. Required: a panel declares its own type
+   * and can never be served another panel's rows.
+   */
+  sourceTypes: SourceType[];
+  /** Defaults to "dashboard". Only the audit path passes "backend". */
+  audience?: Audience;
   /** Classifier severity values to keep. Omit for every severity. */
   severities?: string[];
   eventTypes?: string[];
-  excludeInformational?: boolean;
-  onlyInformational?: boolean;
   requireUrl?: boolean;
   requireText?: boolean;
   requireByline?: boolean;
   breakingOrSevere?: boolean;
   sinceHours?: number;
+  /**
+   * Which time column sinceHours filters on. Defaults to published_at, the
+   * source's own event time, which is what every feed-collected row carries and
+   * what a conflict tracker must order by.
+   *
+   * "ingested" exists for a collector that genuinely has no publication time to
+   * store: the OSINT search returns a report without a parseable date, so its
+   * published_at is NULL rather than invented, and a published_at window would
+   * then exclude every one of its rows. Measured: it excluded all of them, and
+   * the panel served nothing while holding real stored items.
+   */
+  sinceField?: "published" | "ingested";
 }
 
-const SELECT_COLUMNS = `
+// Exported so a caller that must join items against another table (the
+// timeline's persisted selections) selects the same columns a ServingRow
+// carries, instead of hand-rolling a second list that could drift from this
+// one. Aliased as `i`, joined to source_status as `s`.
+export const SERVING_SELECT_COLUMNS = `
   i.id::text        AS id,
   i.source          AS source,
   i.source_uid      AS source_uid,
@@ -184,9 +226,20 @@ function buildWhere(q: ItemQuery): { where: string[]; params: unknown[] } {
   const where: string[] = ["i.noise = false"];
   const params: unknown[] = [];
 
-  if (q.source) {
-    params.push(q.source);
-    where.push(`i.source = $${params.length}`);
+  // Source isolation. An empty list is a query that can match nothing, which
+  // is the correct reading of "this panel is allowed no source type" and is
+  // never silently widened to everything.
+  params.push(sourcesForTypes(q.sourceTypes));
+  where.push(`i.source = ANY($${params.length}::text[])`);
+
+  if ((q.audience ?? "dashboard") === "dashboard") {
+    // Rule 2, as one predicate on every dashboard read. An item unrelated to
+    // a followed conflict has an empty conflicts array; informational is the
+    // classifier's own bucket for reference material, and a row it could not
+    // classify at all is not a development either. None of the three may
+    // reach a public panel through any route.
+    where.push(`cardinality(i.conflicts) > 0`);
+    where.push(`i.event_type IS NOT NULL AND i.event_type <> 'informational'`);
   }
 
   if (q.conflict !== "all") {
@@ -209,14 +262,6 @@ function buildWhere(q: ItemQuery): { where: string[]; params: unknown[] } {
     where.push(`i.event_type = ANY($${params.length}::text[])`);
   }
 
-  if (q.excludeInformational) {
-    where.push(`i.event_type IS NOT NULL AND i.event_type <> 'informational'`);
-  }
-
-  if (q.onlyInformational) {
-    where.push(`(i.event_type IS NULL OR i.event_type = 'informational')`);
-  }
-
   if (q.breakingOrSevere) {
     where.push(`(i.is_breaking = true OR i.severity IN ('high', 'critical'))`);
   }
@@ -230,31 +275,70 @@ function buildWhere(q: ItemQuery): { where: string[]; params: unknown[] } {
   }
 
   if (q.requireByline) {
-    where.push(`(coalesce(i.author, '') <> '' OR coalesce(i.source_uid, '') <> '')`);
+    where.push(`coalesce(i.author, '') <> ''`);
   }
 
   if (q.sinceHours) {
+    const column = q.sinceField === "ingested" ? "i.ingested_at" : "i.published_at";
     params.push(String(q.sinceHours));
-    where.push(`i.published_at >= NOW() - ($${params.length} || ' hours')::interval`);
+    where.push(`${column} >= NOW() - ($${params.length} || ' hours')::interval`);
   }
 
   return { where, params };
+}
+
+// Defence in depth against a future edit to buildWhere: what the SQL returned
+// is checked against what the caller asked for, and a breach throws rather
+// than being served. A panel returning nothing is a bad day; a panel returning
+// another panel's sources is the bug this task exists to close.
+function assertIsolation(rows: ServingRow[], q: ItemQuery): void {
+  const allowed = new Set<string>(q.sourceTypes);
+  const breached = rows.filter((r) => !allowed.has(sourceTypeOf(r.source) as SourceType));
+  if (breached.length > 0) {
+    const seen = Array.from(new Set(breached.map((r) => `${r.source}/${sourceTypeOf(r.source)}`)));
+    throw new Error(
+      `source isolation breach: ${breached.length} of ${rows.length} rows are not in [${q.sourceTypes.join(", ")}] (${seen.join(", ")})`,
+    );
+  }
+
+  if ((q.audience ?? "dashboard") !== "dashboard") return;
+  const leaked = rows.filter(
+    (r) =>
+      (r.conflicts ?? []).length === 0 ||
+      !r.event_type ||
+      r.event_type === "informational",
+  );
+  if (leaked.length > 0) {
+    throw new Error(
+      `backend-only leak: ${leaked.length} of ${rows.length} rows are unassigned or informational`,
+    );
+  }
 }
 
 export async function fetchItems(q: ItemQuery): Promise<ServingRow[]> {
   const { where, params } = buildWhere(q);
   params.push(q.limit);
 
+  // Ordering matches the window: a caller filtering on ingested_at has rows
+  // whose published_at is null by construction, and ordering those by
+  // published_at leaves the sequence to the id tiebreak alone. Both branches
+  // end on id DESC, so either order is total and two calls cannot reshuffle.
+  const orderBy =
+    q.sinceField === "ingested"
+      ? "i.ingested_at DESC, i.id DESC"
+      : "i.published_at DESC NULLS LAST, i.id DESC";
+
   const { rows } = await pool.query(
-    `SELECT ${SELECT_COLUMNS}
+    `SELECT ${SERVING_SELECT_COLUMNS}
      FROM items i
      LEFT JOIN source_status s ON s.id = i.source_uid
      WHERE ${where.join(" AND ")}
-     ORDER BY i.published_at DESC NULLS LAST, i.id DESC
+     ORDER BY ${orderBy}
      LIMIT $${params.length}`,
     params,
   );
 
+  assertIsolation(rows as ServingRow[], q);
   return rows as ServingRow[];
 }
 
@@ -267,6 +351,55 @@ export async function countItems(q: Omit<ItemQuery, "limit">): Promise<number> {
     params,
   );
   return rows[0]?.n ?? 0;
+}
+
+// Rule 2's other half: the backend-only rows must remain queryable for audit,
+// so nothing here deletes them and this is the query that proves they are
+// still there. Reported by GET /api/sources alongside the per-conflict counts.
+export interface BackendOnlyCounts {
+  total: number;
+  unassigned: number;
+  informational: number;
+  backend_only: number;
+  dashboard_eligible: number;
+  by_source_type: Array<{ source_type: string; backend_only: number }>;
+}
+
+export async function backendOnlyCounts(): Promise<BackendOnlyCounts> {
+  const [totals, bySource] = await Promise.all([
+    pool.query(
+      `SELECT COUNT(*)::int AS total,
+              COUNT(*) FILTER (WHERE cardinality(conflicts) = 0)::int AS unassigned,
+              COUNT(*) FILTER (WHERE event_type IS NULL OR event_type = 'informational')::int AS informational,
+              COUNT(*) FILTER (WHERE cardinality(conflicts) = 0
+                                  OR event_type IS NULL
+                                  OR event_type = 'informational')::int AS backend_only,
+              COUNT(*) FILTER (WHERE cardinality(conflicts) > 0
+                                 AND event_type IS NOT NULL
+                                 AND event_type <> 'informational')::int AS dashboard_eligible
+       FROM items WHERE noise = false`,
+    ),
+    pool.query(
+      `SELECT source, COUNT(*)::int AS backend_only
+       FROM items
+       WHERE noise = false
+         AND (cardinality(conflicts) = 0 OR event_type IS NULL OR event_type = 'informational')
+       GROUP BY source ORDER BY 2 DESC`,
+    ),
+  ]);
+
+  const row = totals.rows[0] ?? {};
+  return {
+    total: row.total ?? 0,
+    unassigned: row.unassigned ?? 0,
+    informational: row.informational ?? 0,
+    backend_only: row.backend_only ?? 0,
+    dashboard_eligible: row.dashboard_eligible ?? 0,
+    by_source_type: (bySource.rows as Array<{ source: string; backend_only: number }>).map((r) => ({
+      source_type: sourceTypeOf(r.source),
+      backend_only: r.backend_only,
+    })),
+  };
 }
 
 // Per-conflict stored counts, so the assignment is inspectable rather than
