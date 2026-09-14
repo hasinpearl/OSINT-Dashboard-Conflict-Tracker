@@ -13,6 +13,9 @@
     "enrich:all": "tsx src/workers/enrich-cli.ts --all",
     "geocode": "tsx src/workers/geocode-cli.ts",
     "geocode:audit": "tsx src/workers/geocode-audit-cli.ts",
+    "geocode:verify": "tsx src/workers/geocode-verify-cli.ts",
+    "geocode:live": "tsx src/workers/geocode-live-cli.ts",
+    "geocode:strict": "tsx src/workers/geocode-strict-cli.ts",
     "migrate": "tsx src/workers/migrate-cli.ts"
   },
   "dependencies": {

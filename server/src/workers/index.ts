@@ -1,27 +1,19 @@
-import { runRssWorker } from "./rss";
-import { startTelegramWorker } from "./telegram";
-import { runTelegramPreviewWorker } from "./telegramPreview";
-import { runEnrichWorker } from "./enrich-loop";
-import { runGeocodeWorker } from "./geocode-loop";
-import { envKey } from "../env";
 import { initDb } from "../db";
+import { startCollectorLoops } from "./loops";
 
+// The standalone workers container. The collector selection and the lease both
+// live in loops.ts so this entrypoint and the API's in-process fallback cannot
+// drift apart.
 async function main() {
   await initDb();
-  const tgApiId = envKey('TG_API_ID');
-  
-  // Start workers
-  const workers = [runRssWorker(), runEnrichWorker(), runGeocodeWorker()];
-  
-  if (tgApiId) {
-    // Run MTProto worker if API credentials are available
-    workers.push(startTelegramWorker());
-  } else {
-    // Run preview worker if no API credentials
-    workers.push(runTelegramPreviewWorker());
+  const started = await startCollectorLoops("standalone");
+  if (!started) {
+    console.error(
+      "[collectors] another process holds the collector lease, this workers container has nothing to do",
+    );
+    return;
   }
-  
-  await Promise.all(workers);
+  console.log("[collectors] standalone collectors started");
 }
 
 main().catch(console.error);

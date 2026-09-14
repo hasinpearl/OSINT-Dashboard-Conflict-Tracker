@@ -15,6 +15,7 @@ import { translateRoute } from "./routes/translate";
 import { enhancedOnError } from "./errors";
 import { eventsRoute, eventsPinsRoute, statsRoute } from "./routes/events";
 import { sourcesRoute } from "./routes/sources";
+import { bootstrapCollectors } from "./workers/bootstrap";
 
 const app = new Hono();
 
@@ -54,4 +55,4 @@ serve({ fetch: app.fetch, port }, (info) => {
 
 // Start listening first; the DB connects (and retries) in the background so
 // upstream AI calls keep working even when Postgres is down.
-initDb();
+initDb().then(() => bootstrapCollectors());

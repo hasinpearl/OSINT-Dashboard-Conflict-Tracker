@@ -6,6 +6,7 @@ import { classify } from "../enrich";
 import https from "https";
 import http from "http";
 import { JSDOM } from "jsdom";
+import { collectorsShouldStop, sleepUnlessStopped } from "./collector-stop";
 
 //TUNE: Control the (telegram channels). TG_PREVIEW_CHANNELS=comma separated public channel usernames.
 const TG_PREVIEW_CHANNELS = envKey("TG_PREVIEW_CHANNELS")?.split(",").map(c => c.trim()).filter(c => c) || 
@@ -31,6 +32,9 @@ function clampFutureTimestamp(date: Date | null): Date | null {
 
 //TUNE: Control the (redirect depth). TG_PREVIEW_MAX_REDIRECTS=hops followed before a request is abandoned.
 const TG_PREVIEW_MAX_REDIRECTS = parseInt(envKey("TG_PREVIEW_MAX_REDIRECTS") || "5");
+
+//TUNE: Control the (preview error backoff). Seconds the poll loop waits after an unexpected error.
+const TG_PREVIEW_ERROR_BACKOFF_SECONDS = 60;
 
 // Function to make HTTP request, following redirects (t.me/s/ answers 301)
 function httpRequest(
@@ -320,23 +324,25 @@ export async function runTelegramPreviewWorker(): Promise<void> {
   
   console.log(`Starting Telegram Preview worker with ${TG_PREVIEW_CHANNELS.length} channels`);
   
-  while (true) {
+  while (!collectorsShouldStop()) {
     try {
       console.log("Polling Telegram channels...");
       
       // Process all channels sequentially to respect rate limits
       for (const channel of TG_PREVIEW_CHANNELS) {
+        if (collectorsShouldStop()) break;
         await processChannel(channel);
         // Delay between channels
         await sleep(TG_PREVIEW_DELAY_SECONDS);
       }
       
       console.log(`Sleeping for ${TG_PREVIEW_POLL_SECONDS} seconds`);
-      await new Promise(resolve => setTimeout(resolve, TG_PREVIEW_POLL_SECONDS * 1000));
+      await sleepUnlessStopped(TG_PREVIEW_POLL_SECONDS);
     } catch (e: any) {
       const errorMessage = e instanceof Error ? e.message : String(e);
       console.error("Unexpected error in Telegram Preview worker loop:", errorMessage);
-      await new Promise(resolve => setTimeout(resolve, 60 * 1000)); // Wait 1 minute before retrying
+      await sleepUnlessStopped(TG_PREVIEW_ERROR_BACKOFF_SECONDS);
     }
   }
+  console.log("Telegram Preview worker stopped");
 }

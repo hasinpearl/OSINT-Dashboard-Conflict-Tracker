@@ -151,6 +151,18 @@ The `workers` service is what keeps the dashboard current. It is a long-lived pr
 request-triggered. Panels read whatever the workers have already stored, so a page load
 never waits on an upstream fetch and never depends on a scrape succeeding at that moment.
 
+Collection does not depend on that container existing. On start the API waits
+`WORKERS_IN_API_GRACE_SECONDS` (default 90) for a worker heartbeat in `source_status`; if
+none appears it runs the same collector loops in-process, so an api-only deployment still
+ingests. The logs always name the path taken, either `standalone worker detected, not
+starting in-process collectors` or `no worker heartbeat after 90s, starting collectors
+in-process`. Two guards stop a double run: the workers entrypoint never runs the API's
+bootstrap at all, and collection is held under a Postgres session advisory lock that only one
+process per database can hold, so even two API containers cannot both collect. If the workers
+container starts later, the in-process copy sees its heartbeat, stops its loops, and drops the
+lease. Setting `WORKERS_IN_API=false` on the `workers` service in `docker-compose.yml` is
+worth adding as a third, explicit guard.
+
 Port publishing lives in `docker-compose.override.yml` (local runs only). On Coolify the override file is not loaded and no host port is bound. Point the application's domain at the `web` service (port 80); Coolify's reverse proxy routes to the container directly, so it can never collide with ports already allocated on the host.
 
 ## License

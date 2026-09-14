@@ -1,0 +1,230 @@
+{
+  "_README": [
+    "Curated coordinates for conflict locations Nominatim ranks badly or cannot",
+    "return a usable feature for. Keyed by gazetteer place id (server/src/geo.ts).",
+    "An entry here resolves deterministically with no network call, so the pin",
+    "never depends on OSM ranking.",
+    "",
+    "Every lat/lng below was read off a real OSM object, recorded in 'osm' as",
+    "type/id, verified against nominatim.openstreetmap.org on 2026-09-14.",
+    "Nothing here is estimated: if a place has no OSM object, it does not belong",
+    "in this file.",
+    "",
+    "'cc' must agree with the cc the gazetteer expects for that id. The loader",
+    "throws on a mismatch rather than letting a wrong-country pin through.",
+    "",
+    "precision: 'exact' for a point that is the place itself, 'approximate' for a",
+    "centroid standing in for an area (a sea, an oblast, a governorate)."
+  ],
+
+  "gaza_city": {
+    "lat": 31.5128679,
+    "lng": 34.4581358,
+    "cc": "ps",
+    "region": "Gaza",
+    "precision": "exact",
+    "normalized": "Gaza City",
+    "osm": "relation/10521584",
+    "note": "q=Gaza City returns a Tibetan village, two Haifa roads and a war cemetery. The city itself is only reachable as q=Gaza."
+  },
+  "gaza": {
+    "lat": 31.4432234,
+    "lng": 34.3600070,
+    "cc": "ps",
+    "region": "Gaza",
+    "precision": "approximate",
+    "normalized": "Gaza Strip",
+    "osm": "relation/1473938",
+    "note": "OSM returns the Gaza Strip relation with no country_code, so the country check rejects it."
+  },
+  "rafah": {
+    "lat": 31.2822521,
+    "lng": 34.2504867,
+    "cc": "ps",
+    "region": "Gaza",
+    "precision": "exact",
+    "normalized": "Rafah",
+    "osm": "relation/21037874",
+    "note": "Top hits are villages in Syria and Oman. The Rafah relation is tagged landuse=brownfield, so the feature type check rejects it."
+  },
+  "khan_younis": {
+    "lat": 31.3656312,
+    "lng": 34.2969829,
+    "cc": "ps",
+    "region": "Gaza",
+    "precision": "exact",
+    "normalized": "Khan Yunis",
+    "osm": "relation/21169997"
+  },
+  "west_bank": {
+    "lat": 32.0254688,
+    "lng": 35.2888075,
+    "cc": "ps",
+    "region": "West Bank",
+    "precision": "approximate",
+    "normalized": "West Bank",
+    "osm": "relation/1613659",
+    "note": "q=West Bank ranks a Minneapolis railway station first."
+  },
+  "ramallah": {
+    "lat": 31.9030543,
+    "lng": 35.1952255,
+    "cc": "ps",
+    "region": "West Bank",
+    "precision": "exact",
+    "normalized": "Ramallah",
+    "osm": "relation/2717915"
+  },
+  "jenin": {
+    "lat": 32.4618837,
+    "lng": 35.2975660,
+    "cc": "ps",
+    "region": "West Bank",
+    "precision": "exact",
+    "normalized": "Jenin",
+    "osm": "relation/19807826",
+    "note": "Name collides with villages in Poland, Jordan and Syria."
+  },
+  "hebron": {
+    "lat": 31.5289020,
+    "lng": 35.0944873,
+    "cc": "ps",
+    "region": "West Bank",
+    "precision": "exact",
+    "normalized": "Hebron",
+    "osm": "relation/3797325",
+    "note": "Name collides with at least four settlements in the United States."
+  },
+
+  "jerusalem": {
+    "lat": 31.7788472,
+    "lng": 35.2257856,
+    "cc": "il",
+    "precision": "exact",
+    "normalized": "Jerusalem",
+    "osm": "relation/1381350"
+  },
+  "tel_aviv": {
+    "lat": 32.0852997,
+    "lng": 34.7818064,
+    "cc": "il",
+    "precision": "exact",
+    "normalized": "Tel Aviv",
+    "osm": "relation/1382494"
+  },
+
+  "beirut": {
+    "lat": 33.8959203,
+    "lng": 35.4784300,
+    "cc": "lb",
+    "precision": "exact",
+    "normalized": "Beirut",
+    "osm": "node/289346590",
+    "note": "Top hit is the harbour, not the city."
+  },
+  "south_lebanon": {
+    "lat": 33.2855585,
+    "lng": 35.3038316,
+    "cc": "lb",
+    "region": "South Governorate",
+    "precision": "approximate",
+    "normalized": "South Governorate",
+    "osm": "relation/318236",
+    "note": "q=South Lebanon also matches a village in Ohio."
+  },
+  "damascus": {
+    "lat": 33.5130695,
+    "lng": 36.3095814,
+    "cc": "sy",
+    "precision": "exact",
+    "normalized": "Damascus",
+    "osm": "node/1091272140",
+    "note": "Name collides with settlements in Oregon, Maryland, Ohio and Virginia."
+  },
+  "tehran": {
+    "lat": 35.6892523,
+    "lng": 51.3896004,
+    "cc": "ir",
+    "precision": "exact",
+    "normalized": "Tehran",
+    "osm": "relation/6663864"
+  },
+  "hormuz": {
+    "lat": 26.4494061,
+    "lng": 56.2027702,
+    "cc": "om",
+    "precision": "approximate",
+    "normalized": "Strait of Hormuz",
+    "osm": "relation/9326284"
+  },
+
+  "crimea": {
+    "lat": 45.2835044,
+    "lng": 34.2008188,
+    "cc": "ua",
+    "precision": "approximate",
+    "normalized": "Crimean Peninsula",
+    "osm": "relation/7750160"
+  },
+  "donbas": {
+    "lat": 47.9212914,
+    "lng": 37.7809825,
+    "cc": "ua",
+    "region": "Donetsk Oblast",
+    "precision": "approximate",
+    "normalized": "Donetsk Oblast",
+    "osm": "relation/71973",
+    "note": "Donbas is not an OSM admin unit. q=Donbas returns shops and a football stadium. Pinned on Donetsk Oblast, the larger of the two oblasts the name covers."
+  },
+  "kharkiv": {
+    "lat": 49.9923181,
+    "lng": 36.2310146,
+    "cc": "ua",
+    "precision": "exact",
+    "normalized": "Kharkiv",
+    "osm": "relation/3154746"
+  },
+  "odesa": {
+    "lat": 46.4843023,
+    "lng": 30.7322878,
+    "cc": "ua",
+    "precision": "exact",
+    "normalized": "Odesa",
+    "osm": "relation/1413934",
+    "note": "Odessa, Delaware ranks alongside it."
+  },
+
+  "red_sea": {
+    "lat": 20.2965624,
+    "lng": 38.5343146,
+    "cc": null,
+    "precision": "approximate",
+    "normalized": "Red Sea",
+    "osm": "relation/9323456",
+    "note": "Also the name of an Egyptian governorate, which ranks second."
+  },
+  "black_sea": {
+    "lat": 43.8728240,
+    "lng": 33.9938077,
+    "cc": null,
+    "precision": "approximate",
+    "normalized": "Black Sea",
+    "osm": "relation/7160849"
+  },
+  "taiwan_strait": {
+    "lat": 24.4917388,
+    "lng": 119.6054017,
+    "cc": null,
+    "precision": "approximate",
+    "normalized": "Taiwan Strait",
+    "osm": "way/1087698081"
+  },
+  "south_china_sea": {
+    "lat": 15.0000001,
+    "lng": 114.9999999,
+    "cc": null,
+    "precision": "approximate",
+    "normalized": "South China Sea",
+    "osm": "node/303209363"
+  }
+}

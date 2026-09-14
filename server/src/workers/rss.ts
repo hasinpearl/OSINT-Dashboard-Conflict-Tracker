@@ -4,6 +4,7 @@ import { sourceStatusUpdate } from "./source-status";
 import Parser from "rss-parser";
 import crypto from "crypto";
 import { classify } from "../enrich";
+import { collectorsShouldStop, sleepUnlessStopped } from "./collector-stop";
 
 // A deploy with no env configuration at all still has to ingest, so the feed
 // list ships in the code and RSS_FEEDS only overrides it. Every URL below was
@@ -356,16 +357,17 @@ export async function runRssRound(): Promise<void> {
 
 export async function runRssWorker(): Promise<void> {
   logFeedList();
-  
-  while (true) {
+
+  while (!collectorsShouldStop()) {
     try {
       await runRssRound();
       console.log(`[rss] round complete, sleeping ${RSS_POLL_SECONDS}s`);
-      await new Promise(resolve => setTimeout(resolve, RSS_POLL_SECONDS * 1000));
+      await sleepUnlessStopped(RSS_POLL_SECONDS);
     } catch (e) {
       const errorMessage = e instanceof Error ? e.message : String(e);
       console.error("[rss] unexpected error in the poll loop:", errorMessage);
-      await new Promise(resolve => setTimeout(resolve, RSS_LOOP_ERROR_BACKOFF_SECONDS * 1000));
+      await sleepUnlessStopped(RSS_LOOP_ERROR_BACKOFF_SECONDS);
     }
   }
+  console.log("[rss] poll loop stopped");
 }

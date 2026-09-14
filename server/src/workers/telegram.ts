@@ -4,6 +4,7 @@ import { sourceStatusUpdate } from './source-status';
 import { classify } from '../enrich';
 import https from 'https';
 import { JSDOM } from 'jsdom';
+import { collectorsShouldStop, sleepUnlessStopped } from './collector-stop';
 
 //TUNE: Control the (telegram channels). TG_CHANNELS=comma separated public channel usernames.
 const TG_CHANNELS = envKey('TG_CHANNELS')?.split(',').map(c => c.trim()).filter(c => c) || [];
@@ -13,6 +14,10 @@ const TG_MAX_CHANNELS = parseInt(envKey('TG_MAX_CHANNELS') || '40');
 const TG_RESOLVE_DELAY_SECONDS = parseInt(envKey('TG_RESOLVE_DELAY_SECONDS') || '5');
 //TUNE: Control the (heartbeat). TG_HEARTBEAT_SECONDS=how often the worker reports it is alive.
 const TG_HEARTBEAT_SECONDS = parseInt(envKey('TG_HEARTBEAT_SECONDS') || '120');
+//TUNE: Control the (mtproto poll rate). TG_POLL_SECONDS=seconds between polling rounds.
+const TG_POLL_SECONDS = parseInt(envKey('TG_POLL_SECONDS') || '60');
+//TUNE: Control the (mtproto error backoff). Seconds the poll loop waits after an unexpected error.
+const TG_ERROR_BACKOFF_SECONDS = 60;
 
 // Circuit breaker settings
 const MAX_CONSECUTIVE_FAILURES = 3;
@@ -364,26 +369,29 @@ export async function startTelegramWorker(): Promise<void> {
   // Start heartbeat interval
   const heartbeatInterval = setInterval(sendHeartbeat, TG_HEARTBEAT_SECONDS * 1000);
   
-  while (true) {
+  while (!collectorsShouldStop()) {
     try {
       console.log("Polling Telegram channels...");
       
       // Process all channels
       for (const channel of TG_CHANNELS) {
+        if (collectorsShouldStop()) break;
         await processChannel(channel);
         
         // Add delay between channels
-        await new Promise(resolve => setTimeout(resolve, TG_RESOLVE_DELAY_SECONDS * 1000));
+        await sleepUnlessStopped(TG_RESOLVE_DELAY_SECONDS);
       }
       
       console.log("Finished polling all Telegram channels");
       
       // Wait before next poll
-      await new Promise(resolve => setTimeout(resolve, 60 * 1000)); // 1 minute
+      await sleepUnlessStopped(TG_POLL_SECONDS);
     } catch (e) {
       const errorMessage = e instanceof Error ? e.message : String(e);
       console.error("Unexpected error in Telegram worker loop:", errorMessage);
-      await new Promise(resolve => setTimeout(resolve, 60 * 1000)); // Wait 1 minute before retrying
+      await sleepUnlessStopped(TG_ERROR_BACKOFF_SECONDS);
     }
   }
+  clearInterval(heartbeatInterval);
+  console.log("Telegram worker stopped");
 }

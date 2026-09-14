@@ -21,6 +21,8 @@ async function main() {
         no_place_named: result.noPlaceNamed,
         unresolvable: result.unresolvable,
         errors: result.errors,
+        via_override: result.viaOverride,
+        via_nominatim: result.viaNominatim,
         osm_requests: result.rate.requests,
         min_request_gap_ms: result.rate.minGapMs,
         seconds: Number(seconds),

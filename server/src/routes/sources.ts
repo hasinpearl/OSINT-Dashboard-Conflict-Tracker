@@ -14,6 +14,11 @@ const MAX_SOURCES = 200;
 //TUNE: Control the (stale threshold). Seconds since a source last reported before it counts as stale.
 const STALE_AFTER_SECONDS = 15 * 60;
 
+// The collector bootstrap writes marker rows into the same table to record which
+// runtime owns collection. They are not sources, so they stay out of this list
+// and out of its counts.
+const RUNTIME_MARKER_PREFIX = "worker_runtime:";
+
 interface SourceRow {
   id: string;
   source: string;
@@ -36,9 +41,10 @@ export async function sourcesRoute(c: Context) {
     const { rows } = await pool.query<SourceRow>(
       `SELECT id, source, label, ok, failures, last_ok, detail, updated_at
        FROM source_status
+       WHERE id NOT LIKE $1
        ORDER BY ok ASC, source ASC, id ASC
-       LIMIT $1`,
-      [MAX_SOURCES],
+       LIMIT $2`,
+      [`${RUNTIME_MARKER_PREFIX}%`, MAX_SOURCES],
     );
 
     const now = Date.now();

@@ -37,7 +37,7 @@ export interface GeocodeResult {
   osm_type: string;
   osm_id: number;
   place_rank: number;
-  source: "nominatim";
+  source: "nominatim" | "override";
 }
 
 interface NominatimHit {
@@ -226,6 +226,25 @@ export interface GeocodeOutcome {
 //TUNE: Control the (candidates per lookup). Nominatim results examined before a place is given up on.
 const GEOCODE_CANDIDATE_LIMIT = 5;
 
+// Nominatim orders by its own importance score, which is a popularity measure,
+// not a relevance one: q=Beirut puts the harbour above the city, q=Gaza puts
+// Gaza Province in Mozambique above Gaza Governorate. So every valid candidate
+// is scored and the best one wins, rather than the first one accepted.
+function candidateScore(hit: NominatimHit, entry: PlaceEntry, typeMatches: boolean): number {
+  let score = typeMatches ? 100 : 0;
+
+  // A settlement asked for as a settlement should be the settlement itself, not
+  // a neighbourhood inside it or the governorate around it. place_rank 16 is a
+  // city, 15 a town; drifting far from that means a different kind of feature.
+  const rank = Number(hit.place_rank ?? 0);
+  if (entry.kind === "settlement") score -= Math.abs(rank - 16);
+  if (entry.kind === "admin") score -= Math.abs(rank - 8);
+  if (entry.kind === "country") score -= Math.abs(rank - 4);
+
+  score += Math.min(Math.max(Number(hit.importance ?? 0), 0), 1) * 10;
+  return score;
+}
+
 export async function geocodePlace(entry: PlaceEntry): Promise<GeocodeOutcome> {
   const query = entry.names[0];
   const params = new URLSearchParams({
@@ -236,6 +255,12 @@ export async function geocodePlace(entry: PlaceEntry): Promise<GeocodeOutcome> {
     namedetails: "1",
   });
   if (entry.kind === "country") params.set("featureType", "country");
+  // Asking Nominatim for the country up front spends the candidate budget on
+  // plausible hits instead of same-named places on other continents. It is a
+  // narrowing of the search, not a relaxation of the check: validate() still
+  // rejects on country independently, so a wrong-country hit cannot survive
+  // even if this parameter is ignored.
+  if (entry.cc) params.set("countrycodes", entry.cc);
 
   const rejections: RejectedHit[] = [];
   let lastError: string | null = null;
@@ -253,12 +278,21 @@ export async function geocodePlace(entry: PlaceEntry): Promise<GeocodeOutcome> {
       return { result: null, rejections, error: lastError };
     }
 
+    let best: { hit: NominatimHit; typeMatches: boolean; score: number } | null = null;
     for (const hit of hits) {
       const checked = validate(hit, entry);
       if (!checked.ok) {
         rejections.push(checked.rejection);
         continue;
       }
+      const score = candidateScore(hit, entry, checked.typeMatches);
+      if (!best || score > best.score) {
+        best = { hit, typeMatches: checked.typeMatches, score };
+      }
+    }
+
+    if (best) {
+      const hit = best.hit;
       const addr = hit.address || {};
       const region =
         entry.region ||
@@ -274,7 +308,7 @@ export async function geocodePlace(entry: PlaceEntry): Promise<GeocodeOutcome> {
           country: (addr.country_code || "").toUpperCase() || null,
           region,
           precision: precisionFor(hit, entry.kind),
-          confidence: confidenceFor(hit, entry, checked.typeMatches),
+          confidence: confidenceFor(hit, entry, best.typeMatches),
           normalized: hit.namedetails?.["name:en"] || hit.name || query,
           osm_type: hit.osm_type || "unknown",
           osm_id: Number(hit.osm_id ?? 0),
