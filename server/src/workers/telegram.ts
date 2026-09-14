@@ -2,6 +2,7 @@ import { envKey } from '../env';
 import { pool } from '../db';
 import { sourceStatusUpdate } from './source-status';
 import { classify } from '../enrich';
+import { assignConflicts } from '../conflictAssign';
 import https from 'https';
 import { JSDOM } from 'jsdom';
 import { collectorsShouldStop, sleepUnlessStopped } from './collector-stop';
@@ -53,6 +54,11 @@ async function insertTelegramMessage(message: {
       content: message.content,
       publishedAt: message.eventTs,
     });
+    const assigned = assignConflicts({
+      content: message.content,
+      sourceUid: message.channel,
+      source: 'telegram',
+    });
 
     // Insert into database
     const result = await pool.query(
@@ -70,8 +76,11 @@ async function insertTelegramMessage(message: {
         severity,
         is_breaking,
         lang,
-        enrichment
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+        enrichment,
+        conflict,
+        conflicts,
+        conflict_assign
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
       ON CONFLICT (source, external_id) DO NOTHING
       RETURNING id`,
       [
@@ -88,7 +97,11 @@ async function insertTelegramMessage(message: {
         enriched.severity,
         enriched.is_breaking,
         enriched.lang,
-        JSON.stringify(enriched.enrichment)
+        JSON.stringify(enriched.enrichment),
+        // Derived from the array below, never set independently.
+        assigned.conflict,
+        assigned.conflicts,
+        JSON.stringify(assigned.reason)
       ]
     );
     

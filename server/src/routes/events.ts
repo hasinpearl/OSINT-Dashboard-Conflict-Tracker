@@ -41,6 +41,8 @@ export async function eventsRoute(c: Context) {
       NULL as translated_text,
       primary_location,
       enrichment,
+      conflicts,
+      conflict_assign,
       raw
     FROM items
     WHERE noise = false

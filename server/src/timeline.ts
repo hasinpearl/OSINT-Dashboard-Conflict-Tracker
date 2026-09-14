@@ -1,5 +1,6 @@
 import { pool } from "./db";
 import { classify } from "./enrich";
+import { ASSIGNABLE_CONFLICTS, assignConflicts, type AssignedConflict } from "./conflictAssign";
 
 export type Severity = "critical" | "high" | "developing" | "verified" | "info";
 
@@ -132,12 +133,12 @@ export async function getRecentItems(
   try {
     const { rows } = await pool.query(
       `SELECT source, external_id, title, url, content, severity, confidence,
-              published_at, raw
+              published_at, conflicts, raw
        FROM items
-       WHERE conflict = $1 AND panel = $2
+       WHERE conflicts && $1::text[] AND panel = $2
        ORDER BY published_at DESC NULLS LAST, id DESC
        LIMIT $3`,
-      [conflict, panel, limit],
+      [[conflict], panel, limit],
     );
     return rows;
   } catch (e) {
@@ -300,7 +301,7 @@ export async function storeItems(items: NewItem[]): Promise<number> {
   const rows = [...byKey.values()];
   if (rows.length === 0) return 0;
 
-  const COLS_PER_ROW = 16;
+  const COLS_PER_ROW = 18;
   const values: unknown[] = [];
   const tuples = rows.map((it, n) => {
     const enriched = classify({
@@ -308,10 +309,26 @@ export async function storeItems(items: NewItem[]): Promise<number> {
       content: it.content,
       publishedAt: it.publishedAt,
     });
+    // Panel-written rows go through the same assigner as the ingest paths, so
+    // conflicts is populated whatever wrote the row. A caller-supplied conflict
+    // is honoured when it names a real theatre, because a panel route knows
+    // which tab it collected for; anything else is ignored and the text decides.
+    const assigned = assignConflicts({
+      title: it.title,
+      content: it.content,
+      source: it.source,
+    });
+    const caller = (it.conflict ?? "").trim() as AssignedConflict;
+    const conflicts =
+      ASSIGNABLE_CONFLICTS.includes(caller) && !assigned.conflicts.includes(caller)
+        ? [caller, ...assigned.conflicts]
+        : assigned.conflicts;
     values.push(
       it.source,
       it.externalId,
-      it.conflict ?? null,
+      // Derived from the array, never set independently. One source of truth.
+      conflicts[0] ?? null,
+      conflicts,
       it.panel ?? null,
       it.author ?? null,
       it.title ?? null,
@@ -327,6 +344,7 @@ export async function storeItems(items: NewItem[]): Promise<number> {
       enriched.is_breaking,
       enriched.lang,
       JSON.stringify(enriched.enrichment),
+      JSON.stringify(assigned.reason),
     );
     const base = n * COLS_PER_ROW;
     const ph = Array.from({ length: COLS_PER_ROW }, (_, k) => `$${base + k + 1}`);
@@ -336,9 +354,9 @@ export async function storeItems(items: NewItem[]): Promise<number> {
   try {
     const { rowCount } = await pool.query(
       `INSERT INTO items
-         (source, external_id, conflict, panel, author, title, url, content,
+         (source, external_id, conflict, conflicts, panel, author, title, url, content,
           severity, confidence, published_at, raw,
-          event_type, is_breaking, lang, enrichment)
+          event_type, is_breaking, lang, enrichment, conflict_assign)
        VALUES ${tuples.join(", ")}
        ON CONFLICT (source, external_id) DO NOTHING`,
       values,

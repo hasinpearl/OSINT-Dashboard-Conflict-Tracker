@@ -98,7 +98,10 @@ function normalizeArabic(input: string): string {
     .replace(/\u0626/g, "\u064A");
 }
 
-function normalize(input: string): string {
+// Exported for the conflict assigner, which has to fold text exactly the way
+// the event-type rules do. Two copies of this would drift the moment either
+// lexicon gained a term that depends on the folding.
+export function normalize(input: string): string {
   const stripped = input
     .normalize("NFD")
     .replace(/[\u0300-\u036F]/g, "")
@@ -135,7 +138,7 @@ function tokenize(normalized: string, lang: "ar" | "en"): Set<string> {
 // keywords match as substrings on purpose: Arabic glues the article and
 // conjunctions onto the stem (غارة -> والغارة), and these stems are long enough
 // that substring matching does not collide across classes.
-function buildMatcher(pattern: string): (normalized: string) => boolean {
+export function buildMatcher(pattern: string): (normalized: string) => boolean {
   const needle = normalize(pattern);
   if (!needle) return () => false;
   if (isArabicPattern(pattern)) {

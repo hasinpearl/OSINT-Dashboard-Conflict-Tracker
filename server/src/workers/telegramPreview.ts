@@ -2,6 +2,7 @@ import { pool } from "../db";
 import { envKey } from "../env";
 import { sourceStatusUpdate } from "./source-status";
 import { classify } from "../enrich";
+import { assignConflicts } from "../conflictAssign";
 import https from "https";
 import http from "http";
 import { JSDOM } from "jsdom";
@@ -277,6 +278,11 @@ async function insertItem(item: {
       content: item.content,
       publishedAt: item.eventTs,
     });
+    const assigned = assignConflicts({
+      content: item.content,
+      sourceUid: item.channelId,
+      source: item.source,
+    });
 
     const result = await pool.query(
       `INSERT INTO items (
@@ -292,8 +298,11 @@ async function insertItem(item: {
         severity,
         is_breaking,
         lang,
-        enrichment
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+        enrichment,
+        conflict,
+        conflicts,
+        conflict_assign
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
       ON CONFLICT (source, external_id) DO NOTHING
       RETURNING id`,
       [
@@ -309,7 +318,11 @@ async function insertItem(item: {
         enriched.severity,
         enriched.is_breaking,
         enriched.lang,
-        JSON.stringify(enriched.enrichment)
+        JSON.stringify(enriched.enrichment),
+        // Derived from the array below, never set independently.
+        assigned.conflict,
+        assigned.conflicts,
+        JSON.stringify(assigned.reason)
       ]
     );
     

@@ -98,6 +98,9 @@ export async function newsRoute(c: Context) {
         breaking: row.is_breaking,
         timestamp: isoOrNull(row.published_at),
         url: row.url ?? undefined,
+        // The row's own stored assignment, so what a tab returns can be checked
+        // against what the database holds without a second query.
+        conflicts: row.conflicts,
       }));
 
     const result = { stories };

@@ -64,6 +64,7 @@ CREATE TABLE IF NOT EXISTS items (
   source text NOT NULL,
   external_id text NOT NULL,
   conflict text,
+  conflicts text[] NOT NULL DEFAULT '{}',
   panel text,
   author text,
   title text,
@@ -90,6 +91,15 @@ CREATE TABLE IF NOT EXISTS items (
 -- not only declared in CREATE TABLE above. CREATE TABLE IF NOT EXISTS is a
 -- no-op on a database that already has the table, so an index or query that
 -- names a column added only above fails with 42703 on any existing install.
+--
+-- story_id, noise and panel were in exactly that state: each is named by an
+-- index below but neither had its own ALTER, so the schema batch could only
+-- ever succeed on a database whose items table was created by this same
+-- version. Found by applying SCHEMA_SQL to a pre-upgrade items shape.
+ALTER TABLE items ADD COLUMN IF NOT EXISTS story_id bigint REFERENCES stories(id) ON DELETE SET NULL;
+ALTER TABLE items ADD COLUMN IF NOT EXISTS noise boolean NOT NULL DEFAULT false;
+ALTER TABLE items ADD COLUMN IF NOT EXISTS panel text;
+ALTER TABLE items ADD COLUMN IF NOT EXISTS conflict text;
 ALTER TABLE items ADD COLUMN IF NOT EXISTS source_uid text;
 ALTER TABLE items ADD COLUMN IF NOT EXISTS lang text;
 ALTER TABLE items ADD COLUMN IF NOT EXISTS has_media boolean NOT NULL DEFAULT false;
@@ -102,13 +112,36 @@ ALTER TABLE items ADD COLUMN IF NOT EXISTS location_confidence real;
 ALTER TABLE items ADD COLUMN IF NOT EXISTS geocoded_at timestamptz;
 ALTER TABLE items ADD COLUMN IF NOT EXISTS geocode_version smallint;
 
+-- The authoritative conflict assignment, written at ingest. An item genuinely
+-- belongs to more than one theatre (a Russia-Iran sanctions bill, an Iran-China
+-- satellite report), so a single text value is lossy and this is an array.
+-- items.conflict above is the legacy single value: it is now DERIVED from this
+-- array by the same write, never set independently, so the two cannot drift.
+-- This ALTER must stay above the GIN index below, because CREATE TABLE IF NOT
+-- EXISTS is a no-op on an existing database and an index naming a column that
+-- only the CREATE TABLE declares fails with 42703 on every existing install.
+ALTER TABLE items ADD COLUMN IF NOT EXISTS conflicts text[] NOT NULL DEFAULT '{}';
+ALTER TABLE items ADD COLUMN IF NOT EXISTS conflict_assign jsonb;
+
 CREATE INDEX IF NOT EXISTS items_published_at_idx ON items (published_at DESC NULLS LAST);
-CREATE INDEX IF NOT EXISTS items_conflict_panel_idx ON items (conflict, panel);
+CREATE INDEX IF NOT EXISTS items_panel_idx ON items (panel);
 CREATE INDEX IF NOT EXISTS items_story_id_idx ON items (story_id);
 CREATE INDEX IF NOT EXISTS items_content_fts_idx ON items
   USING GIN (to_tsvector('simple', content));
 CREATE INDEX IF NOT EXISTS items_event_type_idx ON items (event_type);
 CREATE INDEX IF NOT EXISTS items_source_idx ON items (source);
+
+-- The panel filter is now an array overlap (conflicts && ARRAY['iran-us']), so
+-- GIN is the index that serves it. This replaced a regex scan over title and
+-- content on every panel load.
+CREATE INDEX IF NOT EXISTS items_conflicts_gin_idx ON items USING GIN (conflicts);
+
+-- Carries any pre-existing single value into the array before the assigner
+-- runs, so a database that had the legacy column populated does not lose it.
+-- Idempotent: only rows with a value and an empty array are touched.
+UPDATE items SET conflicts = ARRAY[conflict]
+  WHERE conflict IS NOT NULL AND conflict <> '' AND conflict <> 'all'
+    AND (conflicts IS NULL OR cardinality(conflicts) = 0);
 
 -- Serving indexes. /api/events always filters noise = false and orders by
 -- published_at DESC, so the partial index is what keeps the feed off a seq scan.

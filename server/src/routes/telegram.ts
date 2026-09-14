@@ -61,6 +61,9 @@ export async function telegramRoute(c: Context) {
       timestamp: isoOrNull(row.published_at),
       message_id: telegramMessageId(row),
       url: row.url ?? undefined,
+      // The row's own stored assignment, so what a tab returns can be checked
+      // against what the database holds without a second query.
+      conflicts: row.conflicts,
     }));
 
     const result = { messages, matching_in_store: matching, returned: messages.length };

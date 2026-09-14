@@ -27,6 +27,19 @@ const CLASSIFIER_SEVERITY_MAP: Record<string, string> = {
 
 const LEGACY_CONFIDENCE = new Set(["verified", "unverified", "developing"]);
 
+// Conflict assignment is stored, not derived here. conflictAssign.ts assigns
+// items.conflicts at write time and the backfill fills every existing row, so a
+// conflict tab filters on an indexed array overlap rather than running a keyword
+// regex over title and content on every load.
+//
+// The keyword lists that used to live in this file are gone on purpose. A
+// query-time list had to be broad enough not to miss real items and narrow
+// enough not to leak, so it did neither: it put a North Korean missile launch
+// and a UK air-traffic item on the china-taiwan tab. Worse, correcting a term
+// changed what a query returned but never corrected the stored data, so there
+// was nothing to audit. The terms now live in conflictAssign.ts, where they are
+// applied once per row on write and leave a reason trail in conflict_assign.
+
 export interface ServingRow {
   id: string;
   source: string;
@@ -44,144 +57,7 @@ export interface ServingRow {
   published_at: Date | null;
   ingested_at: Date;
   outlet_label: string | null;
-}
-
-// Conflict topical filters. Ingested rows carry no conflict column, so the
-// panel filter is a keyword match over title and content in both languages the
-// feeds publish in.
-//TUNE: Control the (conflict filters). Keywords that decide which ingested items a conflict tab shows.
-const CONFLICT_KEYWORDS: Record<Exclude<ConflictKey, "all">, string[]> = {
-  "iran-us": [
-    "iran", "iranian", "tehran", "irgc", "khamenei", "araghchi", "hezbollah",
-    "hormuz", "israel", "israeli", "netanyahu", "gaza", "houthi", "yemen",
-    "ايران", "إيران", "طهران", "الحرس الثوري", "حزب الله", "هرمز",
-    "اسرائيل", "إسرائيل", "غزة", "الحوثي", "اليمن",
-  ],
-  "ukraine-russia": [
-    "ukraine", "ukrainian", "kyiv", "kharkiv", "russia", "russian", "moscow",
-    "putin", "zelensky", "donbas", "crimea", "nato", "black sea",
-    "أوكرانيا", "اوكرانيا", "كييف", "روسيا", "موسكو", "بوتين", "زيلينسكي",
-    "الناتو", "القرم",
-  ],
-  "china-taiwan": [
-    "china", "chinese", "beijing", "taiwan", "taipei", "xi jinping",
-    "south china sea", "taiwan strait", "pla", "aukus", "indo-pacific",
-    "semiconductor",
-    "الصين", "بكين", "تايوان", "تايبيه", "شي جين", "بحر الصين", "مضيق تايوان",
-  ],
-};
-
-// Telegram is not RSS prose. Channels post two words and a flag pair, Arabic
-// without the definite article, and shorthand no wire service would print, so
-// the RSS keyword list matches almost none of it and the tab collapsed to a
-// single row. These terms are additive: they widen telegram only, so the news,
-// OSINT and bias panels keep counting exactly what they counted before.
-//TUNE: Control the (telegram conflict filters). Extra terms, transliterations and flags matched only against telegram rows.
-const TELEGRAM_EXTRA_KEYWORDS: Record<Exclude<ConflictKey, "all">, string[]> = {
-  "iran-us": [
-    "idf", "iaf", "centcom", "mossad", "knesset", "tel aviv", "haifa", "eilat",
-    "west bank", "rafah", "khan younis", "jenin", "tulkarm", "ramallah",
-    "hamas", "qassam", "islamic jihad", "plo", "fatah",
-    "lebanon", "lebanese", "beirut", "nasrallah", "litani", "nabatieh",
-    "syria", "syrian", "damascus", "aleppo", "golan", "tartus", "latakia",
-    "iraq", "iraqi", "baghdad", "erbil", "sulaimaniyah", "halabja", "kataib",
-    "islamic resistance", "axis of resistance", "pmf", "ain al asad",
-    "sanaa", "marib", "hodeidah", "ansar allah", "red sea", "bab el mandeb",
-    "saudi", "riyadh", "jazan", "najran", "abha", "khamis mushait", "aramco",
-    "natanz", "fordow", "bushehr", "arak", "revolutionary guard", "basij",
-    "quds force", "soleimani", "strait of hormuz", "persian gulf",
-    "fifth fleet", "sixth fleet",
-    "حماس", "القسام", "الجهاد الاسلامي", "الضفة", "رفح", "خان يونس", "جنين",
-    "طولكرم", "رام الله", "تل ابيب", "حيفا", "الجيش الاسرائيلي", "الكنيست",
-    "لبنان", "بيروت", "نصر الله", "النبطية", "الليطاني",
-    "سوريا", "دمشق", "حلب", "الجولان", "طرطوس", "اللاذقية",
-    "العراق", "بغداد", "اربيل", "السليمانية", "حلبجة", "كتائب", "الحشد",
-    "المقاومة الاسلامية", "محور المقاومة",
-    "صنعاء", "مارب", "مأرب", "الحديدة", "انصار الله", "البحر الاحمر",
-    "باب المندب", "الحوثيين",
-    "السعودية", "الرياض", "جيزان", "نجران", "ابها", "أبها", "خميس مشيط",
-    "ارامكو", "نطنز", "فوردو", "بوشهر", "فيلق القدس", "سليماني",
-    "مضيق هرمز", "الخليج الفارسي",
-    "\u{1F1EE}\u{1F1F7}", "\u{1F1EE}\u{1F1F1}", "\u{1F1FE}\u{1F1EA}",
-    "\u{1F1F8}\u{1F1E6}", "\u{1F1F1}\u{1F1E7}", "\u{1F1F8}\u{1F1FE}",
-    "\u{1F1EE}\u{1F1F6}", "\u{1F1F5}\u{1F1F8}",
-  ],
-  "ukraine-russia": [
-    "kharkov", "odesa", "odessa", "kherson", "mykolaiv", "zaporizhzhia",
-    "zaporozhye", "bakhmut", "avdiivka", "pokrovsk", "kupyansk", "chasiv yar",
-    "sumy", "chernihiv", "lviv", "dnipro", "kramatorsk", "mariupol",
-    "belgorod", "kursk", "bryansk", "rostov", "sevastopol", "kerch",
-    "donetsk", "luhansk", "dpr", "lpr", "azov", "wagner", "kadyrov",
-    "shoigu", "gerasimov", "lavrov", "medvedev", "kremlin", "rosgvardia",
-    "duma", "ldpr", "svo", "special military operation",
-    "afu", "vsu", "azov brigade", "himars", "atacms", "storm shadow",
-    "iskander", "kinzhal", "kalibr", "geran", "lancet", "orlan",
-    "belarus", "belarusian", "minsk", "lukashenko", "kaliningrad",
-    "خاركيف", "خاركوف", "اوديسا", "أوديسا", "خيرسون", "زابوريجيا", "باخموت",
-    "دونيتسك", "لوغانسك", "ماريوبول", "كورسك", "بيلغورود", "سيفاستوبول",
-    "الكرملين", "لافروف", "مدفيديف", "الدوما", "فاغنر", "بيلاروسيا", "مينسك",
-    "لوكاشينكو", "كالينينغراد",
-    "\u{1F1F7}\u{1F1FA}", "\u{1F1FA}\u{1F1E6}", "\u{1F1E7}\u{1F1FE}",
-  ],
-  "china-taiwan": [
-    "prc", "kuomintang", "dpp", "lai ching-te", "wang yi", "tsai ing-wen",
-    "kinmen", "matsu", "penghu", "pratas", "senkaku", "diaoyu", "spratly",
-    "paracel", "scarborough", "second thomas shoal", "sabina shoal",
-    "luzon strait", "miyako strait", "bashi channel", "median line",
-    "pla navy", "plaaf", "plan", "adiz", "median line incursion",
-    "first island chain", "quad", "tsmc", "hong kong", "xinjiang",
-    "north korea", "pyongyang", "kim jong",
-    "بكين", "تايوان", "تايبيه", "هونغ كونغ", "شينجيانغ", "كينمن",
-    "سبراتلي", "سكاربورو", "مضيق لوزون", "كوريا الشمالية", "بيونغيانغ",
-    "\u{1F1E8}\u{1F1F3}", "\u{1F1F9}\u{1F1FC}", "\u{1F1F0}\u{1F1F5}",
-  ],
-};
-
-// A channel whose entire editorial remit is one theatre makes every one of its
-// posts on-topic, including the ones too terse to carry a keyword ("All clear,
-// alerts ended"). Only unambiguous single-theatre channels are listed; the
-// general monitors are left to text matching so the tab keeps meaning
-// something.
-//TUNE: Control the (channel conflict binding). Telegram channels whose every post counts toward one conflict.
-const TELEGRAM_CONFLICT_CHANNELS: Record<Exclude<ConflictKey, "all">, string[]> = {
-  "iran-us": ["RocketAlert", "idkunim_il"],
-  "ukraine-russia": ["ukr_leaks_eng"],
-  "china-taiwan": [],
-};
-
-const LATIN_TERM = /^[\x20-\x7E]+$/;
-
-function escapeRegex(term: string): string {
-  return term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-// Latin terms get word boundaries, which is not cosmetic: as plain substrings
-// "nato" matched "senator" and "china" matched "machinations", so both lists
-// were quietly pulling in unrelated rows. Arabic and emoji stay substrings on
-// purpose, the first because Arabic glues the article and conjunctions onto the
-// stem (غزة -> وغزة), the second because a flag carries no word boundary.
-function conflictRegex(terms: string[]): string {
-  const latin: string[] = [];
-  const raw: string[] = [];
-  for (const term of terms) {
-    (LATIN_TERM.test(term) ? latin : raw).push(escapeRegex(term.trim()));
-  }
-  const parts: string[] = [];
-  if (latin.length > 0) parts.push(`\\y(?:${latin.join("|")})\\y`);
-  if (raw.length > 0) parts.push(`(?:${raw.join("|")})`);
-  return parts.join("|");
-}
-
-export function conflictTerms(
-  conflict: Exclude<ConflictKey, "all">,
-  source?: "rss" | "telegram",
-): string[] {
-  const base = CONFLICT_KEYWORDS[conflict];
-  return source === "telegram" ? [...base, ...TELEGRAM_EXTRA_KEYWORDS[conflict]] : base;
-}
-
-export function conflictChannels(conflict: Exclude<ConflictKey, "all">): string[] {
-  return TELEGRAM_CONFLICT_CHANNELS[conflict];
+  conflicts: string[];
 }
 
 export function legacySeverity(value: string | null): string {
@@ -300,6 +176,7 @@ const SELECT_COLUMNS = `
   i.lang            AS lang,
   i.published_at    AS published_at,
   i.ingested_at     AS ingested_at,
+  i.conflicts       AS conflicts,
   s.label           AS outlet_label`;
 
 // Null published_at sorts last instead of being given a time it never had.
@@ -313,21 +190,13 @@ function buildWhere(q: ItemQuery): { where: string[]; params: unknown[] } {
   }
 
   if (q.conflict !== "all") {
-    // Regex rather than ILIKE ANY: word boundaries on Latin terms, plus the
-    // channel binding for telegram, which is what turns the telegram tab from
-    // one row into the real corpus.
-    params.push(conflictRegex(conflictTerms(q.conflict, q.source)));
-    const textMatch = `(coalesce(i.title, '') || ' ' || coalesce(i.content, '')) ~* $${params.length}`;
-
-    const channels = q.source === "telegram" ? conflictChannels(q.conflict) : [];
-    if (channels.length > 0) {
-      params.push(channels);
-      where.push(
-        `(${textMatch} OR lower(i.source_uid) = ANY(SELECT lower(x) FROM unnest($${params.length}::text[]) x))`,
-      );
-    } else {
-      where.push(textMatch);
-    }
+    // Array overlap against the stored assignment, served by
+    // items_conflicts_gin_idx. Every row a tab returns therefore carries that
+    // conflict in its own conflicts array by construction, which is the
+    // property the old regex could not give: there is no second derivation at
+    // query time that could disagree with what is stored.
+    params.push([q.conflict]);
+    where.push(`i.conflicts && $${params.length}::text[]`);
   }
 
   if (q.severities && q.severities.length > 0) {
@@ -398,4 +267,43 @@ export async function countItems(q: Omit<ItemQuery, "limit">): Promise<number> {
     params,
   );
   return rows[0]?.n ?? 0;
+}
+
+// Per-conflict stored counts, so the assignment is inspectable rather than
+// trusted. Reported by GET /api/sources.
+export interface ConflictAssignmentCount {
+  conflict: string;
+  items: number;
+  rss: number;
+  telegram: number;
+}
+
+export async function conflictAssignmentCounts(): Promise<{
+  assigned: ConflictAssignmentCount[];
+  unassigned: number;
+  total: number;
+}> {
+  const [byConflict, totals] = await Promise.all([
+    pool.query(
+      `SELECT c AS conflict,
+              COUNT(*)::int AS items,
+              COUNT(*) FILTER (WHERE source = 'rss')::int AS rss,
+              COUNT(*) FILTER (WHERE source = 'telegram')::int AS telegram
+       FROM items, unnest(conflicts) AS c
+       WHERE noise = false
+       GROUP BY c
+       ORDER BY 2 DESC`,
+    ),
+    pool.query(
+      `SELECT COUNT(*)::int AS total,
+              COUNT(*) FILTER (WHERE cardinality(conflicts) = 0)::int AS unassigned
+       FROM items WHERE noise = false`,
+    ),
+  ]);
+
+  return {
+    assigned: byConflict.rows as ConflictAssignmentCount[],
+    unassigned: totals.rows[0]?.unassigned ?? 0,
+    total: totals.rows[0]?.total ?? 0,
+  };
 }

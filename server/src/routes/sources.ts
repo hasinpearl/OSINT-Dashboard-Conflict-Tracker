@@ -1,6 +1,7 @@
 import type { Context } from "hono";
 import { pool } from "../db";
 import { AppError } from "../errors";
+import { conflictAssignmentCounts } from "../serving";
 import { supervisorStatus } from "../workers/supervisor";
 
 // Worker health. When every panel is empty this is the endpoint that says
@@ -39,14 +40,17 @@ function isoOrNull(value: Date | null): string | null {
 
 export async function sourcesRoute(c: Context) {
   try {
-    const { rows } = await pool.query<SourceRow>(
-      `SELECT id, source, label, ok, failures, last_ok, detail, updated_at
-       FROM source_status
-       WHERE id NOT LIKE $1
-       ORDER BY ok ASC, source ASC, id ASC
-       LIMIT $2`,
-      [`${RUNTIME_MARKER_PREFIX}%`, MAX_SOURCES],
-    );
+    const [{ rows }, assignment] = await Promise.all([
+      pool.query<SourceRow>(
+        `SELECT id, source, label, ok, failures, last_ok, detail, updated_at
+         FROM source_status
+         WHERE id NOT LIKE $1
+         ORDER BY ok ASC, source ASC, id ASC
+         LIMIT $2`,
+        [`${RUNTIME_MARKER_PREFIX}%`, MAX_SOURCES],
+      ),
+      conflictAssignmentCounts(),
+    ]);
 
     const now = Date.now();
     const sources = rows.map((row) => ({
@@ -78,6 +82,11 @@ export async function sourcesRoute(c: Context) {
       // this says whether the collector process is even alive right now, which
       // is the difference between a stale feed and no collector at all.
       collector_supervisor: supervisorStatus(),
+      // How many stored rows landed in each conflict, so the assignment can be
+      // checked rather than trusted. unassigned is the number carrying no
+      // conflict at all: it is the count that says whether the assigner is
+      // actually reaching the corpus.
+      conflict_assignment: assignment,
     });
   } catch (e) {
     console.error("sources read failed:", e instanceof Error ? e.message : e);
