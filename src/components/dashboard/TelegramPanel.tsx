@@ -12,21 +12,28 @@ import { PanelEmptyState } from "./PanelEmptyState";
 import { formatLocalDateTime } from "@/utils/formatTime";
 import { useConflictFilter } from "@/contexts/ConflictFilterContext";
 
-// Hessa's curated channel roster, restored verbatim from 300b1cc~1: the same
-// eleven channels, the same labels, the same colours, in her order. The array
-// had been reduced to a bare colour lookup, which erased the legend.
+// Hessa's curated channel roster: the same eighteen channels as
+// CURATED_CHANNELS in server/src/routes/telegram.ts, in the same order, each
+// with its chip label and chip colour. The two lists are kept identical by
+// hand and the panel reports its own roster, so a mismatch shows up as a chip
+// reading 0 forever rather than as silently dropped messages.
+//
+// middleeasteye and iranintl are gone: their t.me/s/ previews carry no message
+// elements at all, so the collector can never read them. aljazeeraenglish
+// replaces the first and iranintl_en, Iran International's own English
+// channel, replaces the second, which is why it keeps the IranIntl label and
+// the red chip.
 //
 // The legend renders THIS list, so a channel that is quiet right now still
-// shows its chip. What the array no longer does is decide which messages are
+// shows its chip. What the array does not do is decide which messages are
 // allowed to render: it used to double as a visibility filter, and any channel
-// the collector ingests that is not named here had every one of its messages
-// dropped by a chip that did not exist. Channels are now hidden only by an
-// explicit click, and one the response carries but the roster does not gets a
-// chip from the fallback palette instead of being silently discarded.
+// the collector ingested that was not named here had every one of its messages
+// dropped by a chip that did not exist. Channels are hidden only by an
+// explicit click.
 //TUNE: Control the (curated channel legend). Hessa's channel list: id, chip label and chip colour, in her order.
 const CHANNELS = [
-  { id: "middleeasteye", label: "MEE", color: "bg-blue-500" },
-  { id: "iranintl", label: "IranIntl", color: "bg-red-500" },
+  { id: "aljazeeraenglish", label: "AlJazeera", color: "bg-blue-500" },
+  { id: "iranintl_en", label: "IranIntl", color: "bg-red-500" },
   { id: "geopolitics_prime", label: "GeoPrime", color: "bg-emerald-500" },
   { id: "bricsnews", label: "BRICS", color: "bg-amber-500" },
   { id: "megatron_ron", label: "Megatron", color: "bg-purple-500" },
@@ -36,25 +43,14 @@ const CHANNELS = [
   { id: "CIG_telegram", label: "CIG", color: "bg-sky-500" },
   { id: "monitor_the_situation", label: "Monitor", color: "bg-lime-500" },
   { id: "ukr_leaks_eng", label: "UkrLeaks", color: "bg-yellow-500" },
+  { id: "RocketAlert", label: "RocketAlert", color: "bg-violet-500" },
+  { id: "GeoPWatch", label: "GeoWatch", color: "bg-teal-500" },
+  { id: "rnintel", label: "RNIntel", color: "bg-fuchsia-500" },
+  { id: "intelslava", label: "IntelSlava", color: "bg-green-500" },
+  { id: "OSINTdefender", label: "OSINTDef", color: "bg-indigo-500" },
+  { id: "BellumActaNews", label: "BellumActa", color: "bg-pink-500" },
+  { id: "idkunim_il", label: "Idkunim", color: "bg-slate-500" },
 ];
-
-//TUNE: Control the (fallback chip palette). Colours cycled for channels the response carries that are not on the curated roster.
-const FALLBACK_COLORS = [
-  "bg-violet-500",
-  "bg-teal-500",
-  "bg-fuchsia-500",
-  "bg-green-500",
-  "bg-slate-500",
-];
-
-//TUNE: Control the (chip label length). Characters of an off-roster channel name shown on its chip.
-const CHIP_LABEL_MAX_CHARS = 12;
-
-function offRosterLabel(channel: string): string {
-  return channel.length <= CHIP_LABEL_MAX_CHARS
-    ? channel
-    : `${channel.slice(0, CHIP_LABEL_MAX_CHARS - 1)}\u2026`;
-}
 
 interface TelegramMessage {
   channel: string;
@@ -91,10 +87,14 @@ export const TelegramPanel = () => {
   const messages = useMemo(() => view?.messages ?? [], [view]);
 
   // Chips are the curated roster in Hessa's order, each carrying its own live
-  // count, followed by any channel the response actually carried that is not
-  // on the roster. Both halves are shown: a roster channel with no posts right
-  // now is a legend entry reading 0, and an off-roster channel with real posts
-  // is visible rather than silently dropped.
+  // count. A roster channel with no posts in this window is a legend entry
+  // reading 0 rather than a missing chip.
+  //
+  // Nothing is off-roster any more: every channel the collector reads is on
+  // the list above. A channel the response carries that is not on it can still
+  // only come from a TG_PREVIEW_CHANNELS override, so it keeps a chip and its
+  // messages stay visible, but there is no "not on the curated roster" marking
+  // to apply to it and no fallback palette: it takes the neutral chip.
   const channels = useMemo(() => {
     const counts = new Map<string, number>();
     for (const m of messages) counts.set(m.channel, (counts.get(m.channel) ?? 0) + 1);
@@ -104,19 +104,17 @@ export const TelegramPanel = () => {
       label: ch.label,
       color: ch.color,
       count: counts.get(ch.id) ?? 0,
-      onRoster: true,
     }));
 
     const rosterIds = new Set(CHANNELS.map((c) => c.id));
     const extra = Array.from(counts.entries())
       .filter(([id]) => !rosterIds.has(id))
       .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
-      .map(([id, count], i) => ({
+      .map(([id, count]) => ({
         id,
-        label: offRosterLabel(id),
-        color: FALLBACK_COLORS[i % FALLBACK_COLORS.length],
+        label: id,
+        color: "bg-muted-foreground",
         count,
-        onRoster: false,
       }));
 
     return [...roster, ...extra];
@@ -163,7 +161,7 @@ export const TelegramPanel = () => {
               <button
                 key={ch.id}
                 onClick={() => toggleFilter(ch.id)}
-                title={`@${ch.id} (${ch.count})${ch.onRoster ? "" : ", not on the curated roster"}`}
+                title={`@${ch.id} (${ch.count})`}
                 className={`text-[9px] font-mono px-1.5 py-0.5 rounded transition-all ${
                   muted.has(ch.id) ? "bg-muted text-muted-foreground" : `${ch.color} text-white`
                 } ${ch.count === 0 ? "opacity-40" : ""}`}

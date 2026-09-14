@@ -1,12 +1,12 @@
 import type { Context } from "hono";
 import { FORCE_MIN_AGE_MS, getCached, setCache } from "../cache";
 import { logCacheHit } from "../costs";
-import { CONFLICT_CONFIG, getConflictConfig, readConflict, type ConflictConfig } from "../conflicts";
+import { conflictConfigFor, enabledConflictKeys, getConflictConfig, readConflict, type ConflictConfig } from "../conflicts";
 import { envKey } from "../env";
 import { readForceRefresh, readJsonBody } from "../request";
 import { AppError } from "../errors";
 import { EDITORIAL_MODEL, selectTimeline, toCandidates } from "../editorial";
-import { developmentStatement } from "../developments";
+import { developmentStatement, cleanSignificance } from "../developments";
 import { pool } from "../db";
 import {
   countItems,
@@ -230,12 +230,16 @@ async function currentSelections(
        LEFT JOIN source_status s ON s.id = i.source_uid
        WHERE ts.conflict = $1
          AND i.noise = false
-         AND cardinality(i.conflicts) > 0
+         AND i.conflicts && $5::text[]
          AND i.event_type = ANY($2::text[])
          AND i.published_at >= NOW() - ($3 || ' hours')::interval
        ORDER BY i.published_at DESC NULLS LAST, i.id DESC
        LIMIT $4`,
-      [config.key, TIMELINE_EVENT_TYPES, String(WINDOW_HOURS), MAX_EVENTS],
+      // $5 is the enabled set. This route only ever builds a timeline for an
+      // enabled conflict, so the test is defence in depth against a future
+      // caller: a persisted selection whose item now carries only disabled
+      // theatres must not come back through the timeline table.
+      [config.key, TIMELINE_EVENT_TYPES, String(WINDOW_HOURS), MAX_EVENTS, enabledConflictKeys()],
     );
     return (rows as Array<ServingRow & { significance: string }>).map((r) => ({
       row: r,
@@ -378,7 +382,10 @@ function renderEntries(
       // phrasing with the channel's phrasing underneath rather than repeating
       // itself.
       summary: paired && own && own !== paired ? own : "",
-      significance,
+      // Part 4: the model-written clause gets the same marker, relative-time
+      // and separator strip as the title, and is dropped rather than rendered
+      // when it cannot be cleaned.
+      significance: cleanSignificance(significance),
       severity: legacySeverity(row.severity),
       event_type: row.event_type ?? "unclassified",
       source: outletName(headlineFrom ?? row),
@@ -408,17 +415,17 @@ export async function hotTopicsRoute(c: Context) {
   }
 
   try {
-    // The "all" tab is three timelines, not one merged feed: a development that
-    // matters in Ukraine does not become a Taiwan development by sitting next
-    // to one, and the model can only judge significance against a single
-    // conflict. The response stays a flat topics list for the panel, with each
-    // entry carrying its own conflict.
-    const keys =
-      config.key === "all"
-        ? (["iran-us", "ukraine-russia", "china-taiwan"] as const)
-        : ([config.key] as const);
+    // The "all" tab is one timeline per ENABLED conflict, not one merged feed:
+    // a development that matters in Ukraine does not become a Taiwan
+    // development by sitting next to one, and the model can only judge
+    // significance against a single conflict. The response stays a flat topics
+    // list for the panel, with each entry carrying its own conflict.
+    //
+    // Read from the registry rather than a hardcoded triple, so a disabled
+    // conflict contributes no timeline and appears in no rollup.
+    const keys = config.key === "all" ? enabledConflictKeys() : [config.key];
 
-    const built = await Promise.all(keys.map((k) => buildTimeline(CONFLICT_CONFIG[k])));
+    const built = await Promise.all(keys.map((k) => buildTimeline(conflictConfigFor(k))));
 
     // Rule 5 across the merged tab too: the same event-time-then-id order, so
     // merging three timelines cannot reorder entries that each timeline had

@@ -331,6 +331,14 @@ async function insertItem(item: {
   }
 }
 
+// A channel name is interpolated into a RegExp below. Telegram usernames are
+// letters, digits and underscores, so nothing in a well-formed one is special,
+// but TG_PREVIEW_CHANNELS is operator input and a stray dot there would
+// silently become a wildcard.
+function escapeForRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 function extractMessagesFromHtml(html: string, channelId: string): Array<{
   messageId: number;
   eventTs: Date;
@@ -362,8 +370,16 @@ function extractMessagesFromHtml(html: string, channelId: string): Array<{
       return;
     }
     
-    // Extract message ID from data-post attribute
-    const postIdMatch = dataPost.match(new RegExp(`${channelId}/(\\d+)`));
+    // Extract message ID from data-post attribute.
+    //
+    // Case-insensitive, because a Telegram username is case-insensitive while
+    // data-post carries the channel's own canonical casing. Measured: the
+    // roster names iranintl_en and the page answers data-post="IranIntl_En/4699",
+    // so a case-sensitive match skipped all 20 messages on a page that had
+    // parsed perfectly, and the caller then reported it as a channel with no
+    // message elements at all. Any channel whose canonical casing differs from
+    // its roster spelling hit the same wall.
+    const postIdMatch = dataPost.match(new RegExp(`^${escapeForRegExp(channelId)}/(\\d+)$`, "i"));
     if (!postIdMatch) {
       return;
     }
@@ -386,6 +402,13 @@ function extractMessagesFromHtml(html: string, channelId: string): Array<{
   });
   
   return messages;
+}
+
+// How many message elements the page carries at all, regardless of whether
+// any parsed. Only used to tell "the page is a block page" apart from "the
+// page is fine and the parse rejected every post".
+function countMessageElements(html: string): number {
+  return new JSDOM(html).window.document.querySelectorAll(".tgme_widget_message").length;
 }
 
 function applyBackoff(channelId: string): void {
@@ -451,10 +474,20 @@ async function processChannel(channelId: string): Promise<ChannelOutcome> {
       // A first page that parses to nothing is a block page or a changed layout,
       // not a quiet channel, and it used to be logged as "no more messages" and
       // recorded as a success. On a later page it is just the end of history.
+      //
+      // The two causes are distinguished, because they were not and that cost a
+      // real diagnosis: a page carrying 20 message elements whose data-post
+      // casing did not match the roster spelling was reported as "no
+      // .tgme_widget_message elements", which sent the investigation at the
+      // fetch when the fault was in the parse. If the elements are there, say
+      // so and say how many were rejected.
       if (messages.length === 0) {
         if (totalPages === 0) {
+          const present = countMessageElements(html);
           throw new Error(
-            `${urlString} returned 200 with ${html.length} chars but no .tgme_widget_message elements, page starts: ${firstLine(html)}`,
+            present > 0
+              ? `${urlString} returned 200 with ${html.length} chars and ${present} .tgme_widget_message elements, but none parsed as a post of ${channelId}: check the data-post channel spelling`
+              : `${urlString} returned 200 with ${html.length} chars but no .tgme_widget_message elements, page starts: ${firstLine(html)}`,
           );
         }
         log(`${channelId} history exhausted after ${totalPages} pages`);

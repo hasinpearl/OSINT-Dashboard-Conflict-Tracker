@@ -91,6 +91,82 @@ const ANNOTATION_TAIL_PATTERNS: RegExp[] = [
 // event. Hessa named it specifically: it must never appear as a development.
 const ADMIN_NOTE = /\badmin\s*note\b/iu;
 
+// Wire-service markers. A channel prefixes a post with its own urgency label
+// and a separator ("BREAKING | Israeli occupation forces target Qantara",
+// "NOW: Missile sightings reported over the Sulaimaniyah border area",
+// "NEW: Saudi Arabia revealed its DF-15 missile"), and that label is the
+// channel's editorial framing, not part of the report. It is stripped, never
+// rendered.
+//
+// The list is enumerated rather than a generic "leading capitals then a colon"
+// rule on purpose. A blanket rule would strip an ATTRIBUTION, which is the
+// same class of error as the greedy hashtag bug above: "IRGC: Iran says it
+// intercepted a drone" would lose its actor and read as an unsourced claim.
+// So only words that are urgency labels and never actors are listed here.
+//
+// Two shapes, deliberately separate, and two label sets.
+//
+// A label followed by an explicit separator is unambiguous at any casing, so
+// SEPARATED_LABELS is the wider set. A label followed by nothing but a space
+// is only a marker when the source wrote it in capitals, and even then only
+// for words that cannot begin a sentence about the event: BARE_LABELS is
+// therefore the narrower set. "NEW" and "UPDATE" are separator-only, because
+// "NEW images emerge showing the aftermath" is a real opening and stripping
+// the first word there would change what the report says.
+//
+// The bare pattern is also case-SENSITIVE: a matched-any-case version turned
+// the ordinary opening "Now that the ceasefire holds..." into "that the
+// ceasefire holds".
+const SEPARATED_LABELS =
+  "BREAKING(?:\\s+NEWS)?|URGENT|JUST\\s+IN|EXCLUSIVE|ALERT|DEVELOPING|FLASH|CONFIRMED|UPDATE|NOW|NEW";
+const BARE_LABELS = "BREAKING(?:\\s+NEWS)?|URGENT|JUST\\s+IN|EXCLUSIVE|DEVELOPING|FLASH";
+const LABEL_WITH_SEPARATOR = new RegExp(
+  `^(?:${SEPARATED_LABELS})\\s*[:|\\-–—•·]+\\s*`,
+  "iu",
+);
+const CAPS_LABEL = new RegExp(`^(?:${BARE_LABELS})\\s+(?=\\S)`, "u");
+
+// Relative time. Hessa's rule: a development entry never renders one. The
+// entry already carries the stored row's absolute ISO 8601 timestamp, so a
+// relative phrase adds nothing and is wrong the moment it is read: "Moments
+// ago, Israeli occupation forces targeted Majdal Zoun" is false an hour later,
+// and the stored text it came from was written by a channel for a live reader.
+//
+// So the phrase is removed and the factual statement around it is kept. What
+// cannot be reduced to a statement without one is excluded by isPublishable,
+// which re-tests for these patterns after the strip: that is what makes the
+// count zero rather than merely smaller.
+const RELATIVE_TIME_PHRASE =
+  "(?:(?:a|an|about|around|roughly|approximately|nearly|over)\\s+)?(?:few\\s+)?(?:\\d+\\s+)?(?:seconds?|minutes?|mins?|hours?|hrs?|moments?|days?|weeks?)(?:\\s+and\\s+\\d+\\s+(?:minutes?|seconds?))?\\s+ago|just\\s+now|moments?\\s+ago|right\\s+now";
+const RELATIVE_TIME_ANY = new RegExp(`\\b(?:${RELATIVE_TIME_PHRASE})\\b`, "giu");
+// A leading relative clause: the whole phrase plus the comma that separates it
+// from the statement it dates. "Moments ago, Israeli forces targeted X" has to
+// become "Israeli forces targeted X", not ", Israeli forces targeted X".
+const RELATIVE_TIME_LEADING = new RegExp(
+  `^(?:${RELATIVE_TIME_PHRASE})\\s*[,:;\\-–—]?\\s*`,
+  "iu",
+);
+// The same phrase as a trailing or inline clause, with the comma that
+// introduced it: "Iran launched a missile towards the Strait of Hormuz, 1 hour
+// and 30 minutes ago." keeps everything before the comma.
+const RELATIVE_TIME_CLAUSE = new RegExp(
+  `\\s*[,;]\\s*(?:${RELATIVE_TIME_PHRASE})\\b`,
+  "giu",
+);
+// A parenthetical dateline: "(the latest 50 minutes ago)". The brackets go
+// with it, since an empty pair reads as a typo.
+const RELATIVE_TIME_PARENTHETICAL = new RegExp(
+  `\\s*\\([^()]*\\b(?:${RELATIVE_TIME_PHRASE})\\b[^()]*\\)`,
+  "giu",
+);
+
+// A run-on where a headline and its body were joined by the channel's own
+// separator: "Headline | body text". The first segment is the headline, which
+// is what Rule 3 asks to prefer, and the rest is the same development at
+// length. A first segment too short to be a statement fails isPublishable and
+// the entry is excluded rather than shown with the separator in it.
+const PIPE_SEPARATOR = / \| /;
+
 // A hashtag country prefix is how one channel datelines a post: "#Poland
 // Shield AI is targeting..." and, with no separator at all, "#USAOman
 // postponed the meeting...". Both forms are markers, so both go, but the match
@@ -163,6 +239,48 @@ function stripMarkers(text: string): string {
   return collapseSpace(out).replace(LEADING_MARKERS, "").trim();
 }
 
+// Wire-service labels, run to a fixed point. A post can carry more than one
+// ("BREAKING | URGENT: ..."), and stripping the first exposes the second, so
+// one pass would leave a marker in the title. The loop is bounded because
+// every iteration must shorten the string.
+function stripLeadingLabels(text: string): string {
+  let out = text;
+  for (;;) {
+    const next = collapseSpace(
+      out.replace(LABEL_WITH_SEPARATOR, "").replace(CAPS_LABEL, ""),
+    ).replace(LEADING_MARKERS, "");
+    if (next === out) return out;
+    out = next;
+  }
+}
+
+// Relative time, in the order that keeps the most factual text.
+//
+// The leading clause first, because that shape is the whole reason the phrase
+// is there and removing it leaves a complete statement. Then the introduced
+// clause and the parenthetical, which are both removable with their own
+// punctuation. Anything still left is a relative phrase welded into the middle
+// of a sentence, where deleting it would leave prose the source never wrote,
+// so it is NOT patched over: the phrase is blanked and isPublishable then
+// rejects the result, which is the honest outcome.
+function stripRelativeTime(text: string): string {
+  let out = collapseSpace(text).replace(RELATIVE_TIME_LEADING, "");
+  out = out.replace(RELATIVE_TIME_PARENTHETICAL, "");
+  out = out.replace(RELATIVE_TIME_CLAUSE, "");
+  return collapseSpace(out).replace(LEADING_MARKERS, "").trim();
+}
+
+// A headline welded to its body with the channel's own pipe. Keeping the first
+// segment is the same substitution splitRunTogetherHeadline makes for the
+// no-separator form: one stored string in place of another, no paraphrase.
+function splitPipedHeadline(text: string): string {
+  if (!PIPE_SEPARATOR.test(text)) return text;
+  const head = text.split(PIPE_SEPARATOR)[0]?.trim() ?? "";
+  // A leading fragment is not a headline. Returning the whole string lets
+  // isPublishable reject it on the pipe test rather than publishing a stub.
+  return head.length >= DEVELOPMENT_MIN_CHARS ? head : text;
+}
+
 // One sentence. A cut only ever lands on a sentence terminator that the stored
 // text already had, so the result is a prefix of a real sentence sequence and
 // never a clause the source did not end there.
@@ -181,6 +299,13 @@ function hasEmoji(text: string): boolean {
 // Rule 3's exclusion test, applied to the CLEANED text. A fragment, a residual
 // marker, an Admin Note or anything still carrying an emoji is dropped rather
 // than shown raw.
+//
+// The last three tests are Part 4's guarantee, and they are ASSERTIONS rather
+// than cleanup: cleanCandidate has already removed every marker, relative
+// phrase and separator it can remove without inventing prose, so anything
+// still matching here is text that could not be cleaned. Hessa's existing rule
+// applies to it unchanged, and it is excluded instead of being shown raw. That
+// is what makes the three counts zero rather than smaller.
 function isPublishable(text: string): boolean {
   if (!text) return false;
   if (Array.from(text).length < DEVELOPMENT_MIN_CHARS) return false;
@@ -192,14 +317,32 @@ function isPublishable(text: string): boolean {
   // still leading means a marker survived the strip.
   if (/^[^\p{L}\p{N}"'“”«]/u.test(text)) return false;
   if (!/\p{L}/u.test(text)) return false;
+  if (LABEL_WITH_SEPARATOR.test(text) || CAPS_LABEL.test(text)) return false;
+  RELATIVE_TIME_ANY.lastIndex = 0;
+  if (RELATIVE_TIME_ANY.test(text)) return false;
+  if (PIPE_SEPARATOR.test(text)) return false;
   return true;
 }
 
+// The cleaning order is the order the defects nest in.
+//
+// The wire label is outermost: it sits before everything, including before a
+// relative clause ("BREAKING | Moments ago, forces targeted X"), so stripping
+// it first exposes the clause to the next step. The pipe split comes after the
+// label strip for the same reason: on "BREAKING | Israeli forces target
+// Qantara" the pipe is the label's own separator, and splitting first would
+// have kept "BREAKING" as the whole headline. Relative time goes last of the
+// three because the earlier steps can bring a clause to the front of the
+// string, where the leading pattern handles it best.
 function cleanCandidate(raw: string): string {
   if (!raw) return "";
   let text = stripLoneSurrogates(raw);
   text = firstSyndicatedSegment(text);
   text = stripMarkers(text);
+  text = stripLeadingLabels(text);
+  text = splitPipedHeadline(text);
+  text = stripRelativeTime(text);
+  text = stripLeadingLabels(text);
   text = splitRunTogetherHeadline(text);
   text = stripOutletSuffix(text);
   text = collapseSpace(text);
@@ -238,4 +381,29 @@ export const developmentChecks = { cleanCandidate, isPublishable, hasEmoji };
 
 export function stripPictographs(text: string): string {
   return collapseSpace(text.replace(PICTOGRAPH_ANY, " "));
+}
+
+// Part 4's rule applies to every returned field, not only the title. The
+// significance clause is model-written, and a model handed a post opening
+// "BREAKING | Moments ago..." will echo that framing back, so the same three
+// strips run over it. A clause that still carries a marker, a relative phrase
+// or a separator after cleaning is dropped: significance is optional on an
+// entry, so losing it costs the reader a clause, while rendering "Moments ago"
+// would be wrong the second it was displayed.
+export function cleanSignificance(text: string): string {
+  if (!text) return "";
+  let out = collapseSpace(stripLoneSurrogates(text));
+  out = stripPictographs(out);
+  out = stripLeadingLabels(out);
+  out = splitPipedHeadline(out);
+  out = stripRelativeTime(out);
+  out = stripLeadingLabels(out);
+  out = collapseSpace(out);
+
+  RELATIVE_TIME_ANY.lastIndex = 0;
+  if (RELATIVE_TIME_ANY.test(out)) return "";
+  if (PIPE_SEPARATOR.test(out)) return "";
+  if (LABEL_WITH_SEPARATOR.test(out) || CAPS_LABEL.test(out)) return "";
+  if (hasEmoji(out)) return "";
+  return out;
 }

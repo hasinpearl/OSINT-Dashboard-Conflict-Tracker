@@ -1,4 +1,21 @@
-export type ConflictKey = "all" | "iran-us" | "ukraine-russia" | "china-taiwan";
+import { pool } from "./db";
+
+// The conflict registry. Two separable things live here on purpose:
+//
+// 1. CONFLICT_CONFIG, the editorial definition of each theatre Hessa follows:
+//    its search terms, its bias poles, its news sources, its expert roster.
+// 2. The enabled flag, which decides what the API REVEALS.
+//
+// Hessa's requirement, in her words: the backend collects broadly and forever,
+// and conflicts are a layer on top deciding what is revealed. So disabling a
+// conflict is a serving decision and nothing else. conflictAssign.ts keeps
+// tagging every incoming row into every theatre it matches, disabled or not,
+// and the stored rows of a disabled conflict are never touched. Re-enabling it
+// three months later brings the whole of its collected history back with it.
+//
+// The flag here is the DEFAULT. A row in conflict_settings overrides it at
+// runtime, which is what lets Hessa switch a theatre on or off without an edit
+// and a redeploy.
 
 export interface Expert {
   name: string;
@@ -6,8 +23,13 @@ export interface Expert {
   kind: "official" | "analyst";
 }
 
-export interface ConflictConfig {
-  key: ConflictKey;
+export interface ConflictEntry {
+  /**
+   * Whether the API reveals this conflict. Disabled means invisible: no tab,
+   * no entry in any conflict list, and excluded from the "all" tab. It does
+   * NOT mean uncollected and it does NOT mean deleted.
+   */
+  enabled: boolean;
   searchTerms: string;
   label: string;
   region: string;
@@ -19,9 +41,21 @@ export interface ConflictConfig {
   experts: Expert[];
 }
 
-export const CONFLICT_CONFIG: Record<Exclude<ConflictKey, "all">, ConflictConfig> = {
+// The object key IS the conflict key. It is not repeated inside the entry,
+// because two places to state the same key is a place for them to disagree and
+// nothing would catch it: an entry keyed "ukraine-russia" carrying key:
+// "iran-us" would silently serve the wrong theatre.
+//
+// `satisfies` rather than an explicit Record type annotation: it type-checks
+// every entry AND keeps the literal key set, so AssignedConflictKey below is
+// derived from this object. Adding a conflict here therefore makes the anchor,
+// supporting and channel-binding tables in conflictAssign.ts fail to compile
+// until its terms are supplied, which is the checklist Hessa needs rather than
+// a silently empty tab.
+//TUNE: Control the (conflict registry). Hessa's followed theatres. `enabled` decides what the API reveals; a conflict_settings row overrides it at runtime.
+export const CONFLICT_CONFIG = {
   "iran-us": {
-    key: "iran-us",
+    enabled: true,
     searchTerms:
       "Iran, US, Israel, Middle East conflict, Strait of Hormuz, Gulf security, IRGC, Hezbollah, Iranian nuclear program, US sanctions Iran",
     label: "Iran / U.S.",
@@ -50,7 +84,7 @@ export const CONFLICT_CONFIG: Record<Exclude<ConflictKey, "all">, ConflictConfig
     ],
   },
   "ukraine-russia": {
-    key: "ukraine-russia",
+    enabled: true,
     searchTerms:
       "Ukraine, Russia, Donbas, Crimea, NATO, Zelensky, Putin, Black Sea, Ukrainian counteroffensive, Russian invasion",
     label: "Ukraine / Russia",
@@ -79,7 +113,7 @@ export const CONFLICT_CONFIG: Record<Exclude<ConflictKey, "all">, ConflictConfig
     ],
   },
   "china-taiwan": {
-    key: "china-taiwan",
+    enabled: true,
     searchTerms:
       "China, Taiwan, South China Sea, Xi Jinping, Taiwan Strait, PLA, AUKUS, Indo-Pacific, Chinese military, semiconductor",
     label: "China / Taiwan",
@@ -107,34 +141,172 @@ export const CONFLICT_CONFIG: Record<Exclude<ConflictKey, "all">, ConflictConfig
       { name: "Wen-Ti Sung", title: "Fellow, Atlantic Council Global China Hub", kind: "analyst" },
     ],
   },
-};
+} satisfies Record<string, ConflictEntry>;
 
+/** Every conflict key the code defines, enabled or not. Derived from the object above. */
+export type AssignedConflictKey = keyof typeof CONFLICT_CONFIG;
+export type ConflictKey = "all" | AssignedConflictKey;
+
+export interface ConflictConfig extends ConflictEntry {
+  key: ConflictKey;
+}
+
+/** Declaration order, which is Hessa's order. Includes disabled conflicts. */
+export const ALL_CONFLICT_KEYS = Object.keys(CONFLICT_CONFIG) as AssignedConflictKey[];
+
+export function isConflictKey(value: unknown): value is AssignedConflictKey {
+  return typeof value === "string" && Object.hasOwn(CONFLICT_CONFIG, value);
+}
+
+// ---------------------------------------------------------------------------
+// The enabled registry.
+//
+// Persistence is a conflict_settings table in Postgres, one row per conflict
+// Hessa has explicitly toggled: (conflict, enabled, updated_at). No row means
+// "use the enabled flag in CONFLICT_CONFIG", so a fresh database behaves
+// exactly as the code says and today's behaviour is unchanged.
+//
+// A table rather than a file: the API and the workers are separate containers
+// with no shared filesystem, and Postgres is the one thing both already talk
+// to. A file would also not survive a container rebuild, which is the case
+// "toggle without redeploying" exists for.
+//
+// Read path is a cached map, because getConflictConfig is called on every
+// panel load and must not become a query. The cache is re-read on a TTL so a
+// toggle applied to one process is picked up by the others, and immediately on
+// a write so the process that served the toggle never answers from stale state.
+// ---------------------------------------------------------------------------
+
+//TUNE: Control the (conflict settings ttl). Milliseconds a cached enabled/disabled map is reused before Postgres is re-read, which bounds how long another container serves a stale toggle.
+const SETTINGS_TTL_MS = 30 * 1000;
+
+const overrides = new Map<AssignedConflictKey, boolean>();
+let loadedAt = 0;
+
+/** Re-read conflict_settings when the cached map has aged out. */
+export async function refreshConflictSettings(force = false): Promise<void> {
+  if (!force && Date.now() - loadedAt < SETTINGS_TTL_MS) return;
+  try {
+    const { rows } = await pool.query<{ conflict: string; enabled: boolean }>(
+      "SELECT conflict, enabled FROM conflict_settings",
+    );
+    overrides.clear();
+    for (const row of rows) {
+      // A row for a conflict the code no longer defines is ignored rather than
+      // deleted: Hessa may be mid-rename, and the row is the only record that
+      // she had turned it off.
+      if (isConflictKey(row.conflict)) overrides.set(row.conflict, row.enabled);
+    }
+    loadedAt = Date.now();
+  } catch (e) {
+    // A registry read failure must not blank the dashboard. Keeping the last
+    // known map, or the code defaults on a cold start, is the safe direction:
+    // the worst case is a stale toggle, not an empty API.
+    console.error(
+      "conflict settings read failed, keeping the last known map:",
+      e instanceof Error ? e.message : e,
+    );
+  }
+}
+
+export function isConflictEnabled(key: unknown): boolean {
+  if (!isConflictKey(key)) return false;
+  return overrides.get(key) ?? CONFLICT_CONFIG[key].enabled;
+}
+
+/** The conflicts the API may reveal, in Hessa's declaration order. */
+export function enabledConflictKeys(): AssignedConflictKey[] {
+  return ALL_CONFLICT_KEYS.filter(isConflictEnabled);
+}
+
+export async function setConflictEnabled(
+  key: AssignedConflictKey,
+  enabled: boolean,
+): Promise<void> {
+  await pool.query(
+    `INSERT INTO conflict_settings (conflict, enabled, updated_at)
+     VALUES ($1, $2, now())
+     ON CONFLICT (conflict) DO UPDATE SET enabled = EXCLUDED.enabled, updated_at = now()`,
+    [key, enabled],
+  );
+  await refreshConflictSettings(true);
+}
+
+export interface ConflictRegistryEntry {
+  key: AssignedConflictKey;
+  label: string;
+  region: string;
+  enabled: boolean;
+  /** True when a conflict_settings row is overriding the code default. */
+  overridden: boolean;
+}
+
+/** Every conflict with its current state. Admin and audit view, not a panel feed. */
+export function conflictRegistry(): ConflictRegistryEntry[] {
+  return ALL_CONFLICT_KEYS.map((key) => ({
+    key,
+    label: CONFLICT_CONFIG[key].label,
+    region: CONFLICT_CONFIG[key].region,
+    enabled: isConflictEnabled(key),
+    overridden: overrides.has(key),
+  }));
+}
+
+// ---------------------------------------------------------------------------
+
+function entry(key: AssignedConflictKey): ConflictConfig {
+  return { ...CONFLICT_CONFIG[key], key };
+}
+
+/**
+ * One conflict's full config, keyed. Used by the routes that fan out over
+ * several conflicts at once, so they do not have to reattach the key and
+ * cannot attach the wrong one.
+ */
+export function conflictConfigFor(key: AssignedConflictKey): ConflictConfig {
+  return entry(key);
+}
+
+// The "all" tab is the union of the ENABLED conflicts and nothing else. That is
+// what makes disabling a conflict invisible rather than merely untabbed: its
+// terms leave the aggregate search, its outlets leave the aggregate source
+// list, and its experts leave the aggregate roster, so no panel can reach it
+// through "all" either.
 export function getConflictConfig(conflict: string | undefined | null): ConflictConfig {
-  const key = (conflict || "all") as ConflictKey;
+  const requested = conflict || "all";
 
-  if (key !== "all" && CONFLICT_CONFIG[key]) {
-    return CONFLICT_CONFIG[key];
+  if (requested !== "all" && isConflictEnabled(requested)) {
+    return entry(requested as AssignedConflictKey);
   }
 
-  const all = Object.values(CONFLICT_CONFIG);
+  const enabled = enabledConflictKeys();
+  const all = enabled.map((k) => CONFLICT_CONFIG[k]);
   return {
     key: "all",
+    enabled: true,
     searchTerms: all.map((c) => c.searchTerms).join("; "),
-    label: "All Conflicts (Iran/U.S., Ukraine/Russia, China/Taiwan)",
-    region: "Global (Middle East, Eastern Europe, Indo-Pacific)",
+    label:
+      all.length > 0
+        ? `All Conflicts (${all.map((c) => c.label).join(", ")})`
+        : "All Conflicts (none enabled)",
+    region: all.length > 0 ? `Global (${all.map((c) => c.region).join(", ")})` : "Global",
     biasLeftLabel: "Western / U.S.-aligned",
     biasRightLabel: "Anti-Western / Adversary-aligned",
     biasCenterLabel: "Neutral / International",
     newsSources: Array.from(new Set(all.flatMap((c) => c.newsSources))),
-    timelineStartDate: all.map((c) => c.timelineStartDate).sort()[0],
+    // Sorted lexically, which is chronological for ISO dates. Empty when every
+    // conflict is disabled, rather than a date nothing supports.
+    timelineStartDate: all.map((c) => c.timelineStartDate).sort()[0] ?? "",
     experts: all.flatMap((c) => c.experts),
   };
 }
 
+// A disabled conflict read off a request body is not an error, it is a request
+// for something that is not revealed, and the honest answer to that is the
+// "all" tab. Curling the endpoint with ?conflict=china-taiwan while it is off
+// therefore cannot reach its rows.
 export function readConflict(body: any): ConflictKey {
   const c = body?.conflict;
-  if (c === "iran-us" || c === "ukraine-russia" || c === "china-taiwan" || c === "all") {
-    return c;
-  }
+  if (isConflictEnabled(c)) return c as AssignedConflictKey;
   return "all";
 }

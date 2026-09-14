@@ -1,5 +1,5 @@
 import { pool } from "./db";
-import type { ConflictKey } from "./conflicts";
+import { enabledConflictKeys, isConflictEnabled, type ConflictKey } from "./conflicts";
 import { sourcesForTypes, sourceTypeOf, type SourceType } from "./sourceTypes";
 
 // Panel serving layer. Every panel route reads the items table through here, so
@@ -238,7 +238,20 @@ function buildWhere(q: ItemQuery): { where: string[]; params: unknown[] } {
     // classifier's own bucket for reference material, and a row it could not
     // classify at all is not a development either. None of the three may
     // reach a public panel through any route.
-    where.push(`cardinality(i.conflicts) > 0`);
+    //
+    // The conflict test is an overlap against the ENABLED set rather than
+    // `cardinality > 0`, which is what makes a disabled conflict invisible
+    // instead of merely untabbed. A row assigned only to a disabled theatre
+    // now fails this predicate on every dashboard read, including the "all"
+    // tab; a row assigned to both a disabled and an enabled theatre still
+    // serves on the enabled one. An empty enabled set therefore serves an
+    // empty dashboard, which is the correct reading of "reveal nothing".
+    //
+    // Nothing here touches the stored rows. They stay in items, keep being
+    // assigned as they arrive, and come back the moment the conflict is
+    // re-enabled.
+    params.push(enabledConflictKeys());
+    where.push(`i.conflicts && $${params.length}::text[]`);
     where.push(`i.event_type IS NOT NULL AND i.event_type <> 'informational'`);
   }
 
@@ -302,15 +315,20 @@ function assertIsolation(rows: ServingRow[], q: ItemQuery): void {
   }
 
   if ((q.audience ?? "dashboard") !== "dashboard") return;
+  // The same three tests as the dashboard predicate, re-asserted on what the
+  // SQL actually returned. "Assigned" means assigned to an ENABLED conflict:
+  // a row carrying only a disabled theatre is backend-only, so serving one is
+  // the same class of breach as serving an unassigned row.
+  const revealed = new Set<string>(enabledConflictKeys());
   const leaked = rows.filter(
     (r) =>
-      (r.conflicts ?? []).length === 0 ||
+      !(r.conflicts ?? []).some((c) => revealed.has(c)) ||
       !r.event_type ||
       r.event_type === "informational",
   );
   if (leaked.length > 0) {
     throw new Error(
-      `backend-only leak: ${leaked.length} of ${rows.length} rows are unassigned or informational`,
+      `backend-only leak: ${leaked.length} of ${rows.length} rows are unassigned, assigned only to a disabled conflict, or informational`,
     );
   }
 }
@@ -359,6 +377,8 @@ export async function countItems(q: Omit<ItemQuery, "limit">): Promise<number> {
 export interface BackendOnlyCounts {
   total: number;
   unassigned: number;
+  /** Assigned, but only to conflicts that are currently disabled. Hidden, retained. */
+  disabled_conflict_only: number;
   informational: number;
   backend_only: number;
   dashboard_eligible: number;
@@ -366,25 +386,34 @@ export interface BackendOnlyCounts {
 }
 
 export async function backendOnlyCounts(): Promise<BackendOnlyCounts> {
+  // The same enabled-overlap test the dashboard predicate uses, so these
+  // counts partition the corpus exactly as the panels do. disabled_conflict_only
+  // is the number Hessa needs to see after a toggle: it is the proof that the
+  // rows are hidden and still stored rather than deleted.
+  const enabled = enabledConflictKeys();
   const [totals, bySource] = await Promise.all([
     pool.query(
       `SELECT COUNT(*)::int AS total,
               COUNT(*) FILTER (WHERE cardinality(conflicts) = 0)::int AS unassigned,
+              COUNT(*) FILTER (WHERE cardinality(conflicts) > 0
+                                 AND NOT (conflicts && $1::text[]))::int AS disabled_conflict_only,
               COUNT(*) FILTER (WHERE event_type IS NULL OR event_type = 'informational')::int AS informational,
-              COUNT(*) FILTER (WHERE cardinality(conflicts) = 0
+              COUNT(*) FILTER (WHERE NOT (conflicts && $1::text[])
                                   OR event_type IS NULL
                                   OR event_type = 'informational')::int AS backend_only,
-              COUNT(*) FILTER (WHERE cardinality(conflicts) > 0
+              COUNT(*) FILTER (WHERE conflicts && $1::text[]
                                  AND event_type IS NOT NULL
                                  AND event_type <> 'informational')::int AS dashboard_eligible
        FROM items WHERE noise = false`,
+      [enabled],
     ),
     pool.query(
       `SELECT source, COUNT(*)::int AS backend_only
        FROM items
        WHERE noise = false
-         AND (cardinality(conflicts) = 0 OR event_type IS NULL OR event_type = 'informational')
+         AND (NOT (conflicts && $1::text[]) OR event_type IS NULL OR event_type = 'informational')
        GROUP BY source ORDER BY 2 DESC`,
+      [enabled],
     ),
   ]);
 
@@ -392,6 +421,7 @@ export async function backendOnlyCounts(): Promise<BackendOnlyCounts> {
   return {
     total: row.total ?? 0,
     unassigned: row.unassigned ?? 0,
+    disabled_conflict_only: row.disabled_conflict_only ?? 0,
     informational: row.informational ?? 0,
     backend_only: row.backend_only ?? 0,
     dashboard_eligible: row.dashboard_eligible ?? 0,
@@ -404,8 +434,14 @@ export async function backendOnlyCounts(): Promise<BackendOnlyCounts> {
 
 // Per-conflict stored counts, so the assignment is inspectable rather than
 // trusted. Reported by GET /api/sources.
+//
+// This counts EVERY conflict including the disabled ones, on purpose: it is the
+// audit view, and after Hessa turns a theatre off this is the query that shows
+// its rows are still in Postgres. The `enabled` flag on each entry says which
+// of them the panels are currently revealing.
 export interface ConflictAssignmentCount {
   conflict: string;
+  enabled: boolean;
   items: number;
   rss: number;
   telegram: number;
@@ -435,7 +471,10 @@ export async function conflictAssignmentCounts(): Promise<{
   ]);
 
   return {
-    assigned: byConflict.rows as ConflictAssignmentCount[],
+    assigned: (byConflict.rows as Array<Omit<ConflictAssignmentCount, "enabled">>).map((r) => ({
+      ...r,
+      enabled: isConflictEnabled(r.conflict),
+    })),
     unassigned: totals.rows[0]?.unassigned ?? 0,
     total: totals.rows[0]?.total ?? 0,
   };

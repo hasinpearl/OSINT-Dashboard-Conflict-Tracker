@@ -207,6 +207,25 @@ CREATE TABLE IF NOT EXISTS source_status (
   last_ok timestamptz,
   updated_at timestamptz NOT NULL DEFAULT now()
 );
+
+-- Which conflicts the API reveals. One row per conflict Hessa has explicitly
+-- toggled; no row means "use the enabled flag in conflicts.ts", so a fresh
+-- database behaves exactly as the code says.
+--
+-- This is a SERVING switch and nothing else. Disabling a conflict hides it
+-- from every API response; it does not stop collection and it deletes nothing.
+-- The assigner keeps tagging incoming rows into a disabled theatre, so
+-- re-enabling it later brings its whole collected history back with it. There
+-- is deliberately no ON DELETE anywhere near items.
+--
+-- A table rather than a file because the API and the workers are separate
+-- containers with no shared filesystem, and a file would not survive a
+-- container rebuild, which is the case "toggle without redeploying" exists for.
+CREATE TABLE IF NOT EXISTS conflict_settings (
+  conflict text PRIMARY KEY,
+  enabled boolean NOT NULL,
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
 `;
 
 let ready = false;

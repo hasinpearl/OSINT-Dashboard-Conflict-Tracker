@@ -2,16 +2,26 @@ import { Context } from "hono";
 import { pool } from "../db";
 import { AppError } from "../errors"; // Assuming we have an AppError class
 import { backendOnlyCounts } from "../serving";
+import { enabledConflictKeys } from "../conflicts";
 
 // Rule 2, as a SQL fragment shared by every public read in this file. An item
-// assigned to no followed conflict, and anything the classifier marked
+// assigned to no REVEALED conflict, and anything the classifier marked
 // informational, is Hessa's backend reference material and must never be
 // returned to the dashboard by ANY route. These are GET endpoints that can be
 // curled directly, so the predicate belongs in the query, not in a caller.
-const DASHBOARD_AUDIENCE = `
-      AND cardinality(conflicts) > 0
+//
+// "Revealed" is the enabled set, not merely non-empty: a row assigned only to a
+// disabled conflict is as hidden here as an unassigned one, which is what stops
+// these endpoints being the back door around a toggle. The enabled list is a
+// bound parameter rather than interpolated text, and it is read per request so
+// a toggle takes effect without a restart. The fragment takes the parameter
+// index because each query below numbers its own placeholders.
+function dashboardAudience(index: number): string {
+  return `
+      AND conflicts && $${index}::text[]
       AND event_type IS NOT NULL
       AND event_type <> 'informational'`;
+}
 
 /**
  * GET /api/events
@@ -32,7 +42,12 @@ export async function eventsRoute(c: Context) {
   // Validate limit
   //TUNE: Control the (page size). Default rows per request, and the hard ceiling on any requested limit.
   const limitNum = Math.min(Math.max(parseInt(limit) || 50, 1), 200);
-  
+
+  // The audience predicate's enabled list is $1, so it is bound before any
+  // caller-supplied filter and the numbering below stays sequential.
+  const params: any[] = [enabledConflictKeys()];
+  let paramIndex = 2;
+
   // Build query
   let query = `
     SELECT 
@@ -57,11 +72,8 @@ export async function eventsRoute(c: Context) {
       raw
     FROM items
     WHERE noise = false
-      ${DASHBOARD_AUDIENCE}
+      ${dashboardAudience(1)}
   `;
-  
-  const params: any[] = [];
-  let paramIndex = 1;
   
   // Date filters
   if (since) {
@@ -146,7 +158,11 @@ export async function eventsPinsRoute(c: Context) {
   // Validate limit
   //TUNE: Control the (page size). Default rows per request, and the hard ceiling on any requested limit.
   const limitNum = Math.min(Math.max(parseInt(limit) || 50, 1), 200);
-  
+
+  // As above: the enabled list is $1 so the caller-supplied filters follow it.
+  const params: any[] = [enabledConflictKeys()];
+  let paramIndex = 2;
+
   // Build query for events with primary_location data
   let query = `
     SELECT 
@@ -162,11 +178,8 @@ export async function eventsPinsRoute(c: Context) {
     FROM items
     WHERE primary_location IS NOT NULL
       AND noise = false
-      ${DASHBOARD_AUDIENCE}
+      ${dashboardAudience(1)}
   `;
-  
-  const params: any[] = [];
-  let paramIndex = 1;
   
   // Date filter
   if (since) {
@@ -212,10 +225,15 @@ export async function statsRoute(c: Context) {
     }
   }
 
+  // The enabled list is $1 in every query below, so the optional window
+  // parameter is $2. Both are bound, never interpolated.
   const windowClause = windowHours
-    ? `AND published_at >= NOW() - ($1 || ' hours')::interval`
+    ? `AND published_at >= NOW() - ($2 || ' hours')::interval`
     : "";
-  const windowParams = windowHours ? [String(windowHours)] : [];
+  const queryParams: any[] = windowHours
+    ? [enabledConflictKeys(), String(windowHours)]
+    : [enabledConflictKeys()];
+  const audience = dashboardAudience(1);
 
   try {
     const [
@@ -232,54 +250,54 @@ export async function statsRoute(c: Context) {
            COUNT(*) FILTER (WHERE published_at >= NOW() - INTERVAL '1 hour') AS last_hour
          FROM items
          WHERE noise = false
-           ${DASHBOARD_AUDIENCE}
+           ${audience}
            ${windowClause}`,
-        windowParams,
+        queryParams,
       ),
       pool.query(
         `SELECT event_type, COUNT(*) as count 
          FROM items 
          WHERE event_type IS NOT NULL 
            AND noise = false
-           ${DASHBOARD_AUDIENCE}
+           ${audience}
            ${windowClause}
          GROUP BY event_type 
          ORDER BY count DESC`,
-        windowParams,
+        queryParams,
       ),
       pool.query(
         `SELECT severity, COUNT(*) as count 
          FROM items 
          WHERE severity IS NOT NULL 
            AND noise = false
-           ${DASHBOARD_AUDIENCE}
+           ${audience}
            ${windowClause}
          GROUP BY severity 
          ORDER BY count DESC`,
-        windowParams,
+        queryParams,
       ),
       pool.query(
         `SELECT source, COUNT(*) as count 
          FROM items 
          WHERE source IS NOT NULL 
            AND noise = false
-           ${DASHBOARD_AUDIENCE}
+           ${audience}
            ${windowClause}
          GROUP BY source 
          ORDER BY count DESC`,
-        windowParams,
+        queryParams,
       ),
       pool.query(
         `SELECT primary_location->>'region' as region, COUNT(*) as count 
          FROM items 
          WHERE primary_location IS NOT NULL 
            AND noise = false
-           ${DASHBOARD_AUDIENCE}
+           ${audience}
            ${windowClause}
          GROUP BY primary_location->>'region' 
          ORDER BY count DESC 
          LIMIT 10`,
-        windowParams,
+        queryParams,
       ),
       // Rule 2's audit half. The aggregates above count only what the
       // dashboard may show, so this reports how much the store holds that the

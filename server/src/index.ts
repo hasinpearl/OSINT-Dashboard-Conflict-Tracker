@@ -3,7 +3,15 @@ import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { initDb } from "./db";
 import { envKey } from "./env";
-import { costsSummaryRoute, diagnosticsRoute, healthRoute, requireAdmin } from "./routes/admin";
+import { refreshConflictSettings } from "./conflicts";
+import {
+  conflictsRoute,
+  costsSummaryRoute,
+  diagnosticsRoute,
+  healthRoute,
+  requireAdmin,
+  setConflictEnabledRoute,
+} from "./routes/admin";
 import { analystRoute } from "./routes/analyst";
 import { auditRefreshRoute } from "./routes/audit";
 import { biasTrackerRoute } from "./routes/biasTracker";
@@ -47,7 +55,22 @@ process.on("uncaughtException", (err) => logFatal("uncaught_exception", err));
 
 app.onError(enhancedOnError);
 
+// The enabled/disabled registry is read from Postgres on a TTL, and every
+// route below decides what to reveal from it. Refreshing here rather than in
+// each route means a route cannot be added that forgets to: a toggle applied
+// through another container is picked up within the TTL by every endpoint at
+// once. The call is a no-op while the cached map is fresh.
+app.use("*", async (c, next) => {
+  await refreshConflictSettings();
+  await next();
+});
+
 app.get("/api/health", healthRoute);
+
+// Which conflicts the API reveals. Unauthenticated like /api/sources: it is
+// what the dashboard reads to know which tabs exist, and it carries labels and
+// flags only, never content.
+app.get("/api/conflicts", conflictsRoute);
 
 // Data routes. Same-origin behind nginx, so no CORS handling needed.
 app.post("/api/firecrawl-news", newsRoute);
@@ -72,6 +95,10 @@ app.post("/api/audit-refresh", requireAdmin, auditRefreshRoute);
 app.get("/api/admin/diagnostics", requireAdmin, diagnosticsRoute);
 app.get("/api/admin/costs", requireAdmin, costsSummaryRoute);
 
+// Reveal or hide a conflict without an edit and a redeploy. Admin-only: it
+// changes what the whole dashboard shows. It never touches stored rows.
+app.post("/api/conflicts/:key/enabled", requireAdmin, setConflictEnabledRoute);
+
 app.notFound((c) => c.json({ error: "Not found" }, 404));
 
 const port = Number(envKey("PORT") || 8787);
@@ -80,5 +107,10 @@ serve({ fetch: app.fetch, port }, (info) => {
 });
 
 // Start listening first; the DB connects (and retries) in the background so
-// upstream AI calls keep working even when Postgres is down.
-initDb().then(() => bootstrapCollectors());
+// upstream AI calls keep working even when Postgres is down. The conflict
+// registry is loaded once the schema exists, so the first request answers from
+// Postgres rather than the code defaults; until then the code defaults stand,
+// which is the safe direction.
+initDb()
+  .then(() => refreshConflictSettings(true))
+  .then(() => bootstrapCollectors());

@@ -10,21 +10,32 @@ import { countItems, fetchItems, isoOrNull, telegramMessageId } from "../serving
 const CACHE_KEY_BASE = "telegram-feed";
 const PANEL = "telegram";
 
-// Hessa's curated channel roster, restored verbatim from 300b1cc~1 in this
-// file's own CHANNELS array: same eleven channels, same order. It is the
-// panel's legend and the collector's default channel set, so the list the
-// dashboard labels and the list the backend ingests cannot drift apart.
+// Hessa's curated channel roster. It is the panel's legend and the collector's
+// default channel set, so the list the dashboard labels and the list the
+// backend ingests cannot drift apart.
 //
 // Order is Hessa's and is not sorted here. The frontend renders its chips in
 // this order, so re-sorting would silently reorder her legend.
+//
+// Two of the original eleven are gone because they cannot be collected:
+// middleeasteye and iranintl both serve the plain contact page on t.me/s/,
+// which parses to zero .tgme_widget_message elements, so the preview collector
+// can never read a post from either. They are replaced rather than dropped:
+// aljazeeraenglish covers the same beat as Middle East Eye, and iranintl_en is
+// Iran International's own English channel, the same organisation with a
+// readable preview. Verified live: 20 and 20 messages respectively.
+//
+// The seven added after those already held stored rows while sitting off the
+// roster, which meant real data behind no legend chip. They are official
+// sources now, so they are on the list.
 //
 // Exported for the collector (workers/telegramPreview.ts) and for the panel
 // response, which reports the roster so the legend can render a channel that
 // is quiet right now instead of dropping its chip.
 //TUNE: Control the (curated telegram roster). Hessa's channel list: the panel legend and the collector's default channel set.
 export const CURATED_CHANNELS = [
-  "middleeasteye",
-  "iranintl",
+  "aljazeeraenglish",
+  "iranintl_en",
   "geopolitics_prime",
   "bricsnews",
   "megatron_ron",
@@ -34,6 +45,13 @@ export const CURATED_CHANNELS = [
   "CIG_telegram",
   "monitor_the_situation",
   "ukr_leaks_eng",
+  "RocketAlert",
+  "GeoPWatch",
+  "rnintel",
+  "intelslava",
+  "OSINTdefender",
+  "BellumActaNews",
+  "idkunim_il",
 ] as const;
 
 // Named so the cache layer never pins an empty answer over a filling database.

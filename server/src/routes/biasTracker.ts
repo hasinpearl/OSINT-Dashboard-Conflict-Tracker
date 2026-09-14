@@ -1,7 +1,7 @@
 import type { Context } from "hono";
 import { getCached, setCache } from "../cache";
 import { logCacheHit } from "../costs";
-import { CONFLICT_CONFIG, getConflictConfig, readConflict, type ConflictConfig } from "../conflicts";
+import { conflictConfigFor, enabledConflictKeys, getConflictConfig, readConflict, type ConflictConfig } from "../conflicts";
 import { readForceRefresh, readJsonBody } from "../request";
 import { AppError } from "../errors";
 import { assessBias, EDITORIAL_MODEL, toCandidates, type Bloc } from "../editorial";
@@ -249,12 +249,15 @@ export async function biasTrackerRoute(c: Context) {
 
   try {
     if (config.key === "all") {
-      const keys = ["iran-us", "ukraine-russia", "china-taiwan"] as const;
-      const results = await Promise.all(keys.map((k) => analyzeOne(CONFLICT_CONFIG[k])));
+      // One spectrum per ENABLED conflict, read from the registry rather than
+      // a hardcoded triple, so a disabled conflict gets no bar and no entry.
+      const keys = enabledConflictKeys();
+      const configs = keys.map(conflictConfigFor);
+      const results = await Promise.all(configs.map((cfg) => analyzeOne(cfg)));
 
-      const conflicts = keys.map((k, i) => ({
-        conflict: k,
-        label: CONFLICT_CONFIG[k].label,
+      const conflicts = configs.map((cfg, i) => ({
+        conflict: cfg.key,
+        label: cfg.label,
         ...results[i],
       }));
 

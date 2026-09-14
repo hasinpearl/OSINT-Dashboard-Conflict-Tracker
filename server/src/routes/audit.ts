@@ -1,5 +1,6 @@
 import type { Context } from "hono";
 import { deleteCacheKeys, getCacheRows } from "../cache";
+import { ALL_CONFLICT_KEYS } from "../conflicts";
 import { pool } from "../db";
 
 // Every panel now serves from the items table and uses api_cache only as a
@@ -13,7 +14,11 @@ const KNOWN_FUNCTIONS = [
   "bias-tracker",
   "osint",
 ];
-const CONFLICT_SUFFIXES = ["all", "iran-us", "ukraine-russia", "china-taiwan"];
+
+// Every conflict the registry defines, enabled or not, plus "all". A disabled
+// conflict's cache entries are still KNOWN entries: treating them as orphans
+// would delete the cached pages of a theatre Hessa is about to switch back on.
+const CONFLICT_SUFFIXES = ["all", ...ALL_CONFLICT_KEYS];
 
 function isKnownFunctionName(name: string): boolean {
   if (KNOWN_FUNCTIONS.includes(name)) return true;

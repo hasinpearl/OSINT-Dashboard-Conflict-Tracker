@@ -1,5 +1,5 @@
 import { buildMatcher, normalize } from "./enrich";
-import type { ConflictKey } from "./conflicts";
+import { ALL_CONFLICT_KEYS, type AssignedConflictKey } from "./conflicts";
 
 // Rules-only conflict assignment. No network, no model, no cost: this runs
 // synchronously per row on every write path and over the whole table during a
@@ -16,8 +16,12 @@ import type { ConflictKey } from "./conflicts";
 // unambiguous proper nouns of its own parties (ANCHORS), and everything that is
 // only meaningful next to one of those (SUPPORTING) cannot claim a theatre on
 // its own. That is what stops one ambiguous token from owning a row.
+//
+// Assignment ignores the enabled flag on purpose. A disabled conflict keeps
+// being tagged as rows arrive, which is what lets Hessa switch a theatre on in
+// three months and find its whole collected history already on its tab.
 
-export type AssignedConflict = Exclude<ConflictKey, "all">;
+export type AssignedConflict = AssignedConflictKey;
 
 //TUNE: Control the (assignment version). Bump when the lexicon or the anchor rules change so a backfill can target stale rows.
 export const CONFLICT_ASSIGN_VERSION = 2;
@@ -176,7 +180,13 @@ const CHANNEL_BINDING: Record<AssignedConflict, string[]> = {
   "china-taiwan": [],
 };
 
-export const ASSIGNABLE_CONFLICTS = Object.keys(ANCHORS) as AssignedConflict[];
+// Every conflict the registry defines, enabled or not, in Hessa's declaration
+// order. Read from conflicts.ts rather than off the ANCHORS keys so the two
+// cannot disagree: because ANCHORS, SUPPORTING and CHANNEL_BINDING are each
+// typed Record<AssignedConflict, ...>, adding a conflict to CONFLICT_CONFIG
+// makes this file fail to compile until its terms are supplied, which is the
+// checklist rather than a silently empty tab.
+export const ASSIGNABLE_CONFLICTS = ALL_CONFLICT_KEYS;
 
 interface CompiledTerm {
   label: string;
