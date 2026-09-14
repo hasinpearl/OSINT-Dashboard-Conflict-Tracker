@@ -11,6 +11,7 @@ import { ExpandablePanel } from "./ExpandablePanel";
 import { PanelEmptyState } from "./PanelEmptyState";
 import { formatLocalDateTime } from "@/utils/formatTime";
 import { useConflictFilter } from "@/contexts/ConflictFilterContext";
+import { isConflictDisabled } from "@/lib/conflictDisabled";
 
 // Hessa's curated channel roster: the same eighteen channels as
 // CURATED_CHANNELS in server/src/routes/telegram.ts, in the same order, each
@@ -63,6 +64,8 @@ interface TelegramResponse {
   messages: TelegramMessage[];
   matching_in_store?: number;
   returned?: number;
+  /** Set by the API when the requested conflict is switched off. */
+  conflict_disabled?: boolean;
 }
 
 export const TelegramPanel = () => {
@@ -85,6 +88,11 @@ export const TelegramPanel = () => {
 
   const view = translated ?? data;
   const messages = useMemo(() => view?.messages ?? [], [view]);
+
+  // Read off the raw response, not the translated view: the marker is a flag
+  // the API set, and it must not depend on a translation pass having carried
+  // it through.
+  const disabled = isConflictDisabled(data);
 
   // Chips are the curated roster in Hessa's order, each carrying its own live
   // count. A roster channel with no posts in this window is a legend entry
@@ -155,7 +163,7 @@ export const TelegramPanel = () => {
             {sizeLabel} {t("telegram.messages")} / {channels.length} {t("telegram.sources")}
           </span>
         </div>
-        {channels.length > 0 && (
+        {channels.length > 0 && !disabled && (
           <div className="px-2 py-1.5 border-b border-border flex flex-wrap gap-1">
             {channels.map((ch) => (
               <button
@@ -182,10 +190,13 @@ export const TelegramPanel = () => {
               ))}
             </div>
           )}
-          {error && !isLoading && (
+          {/* The disabled state is checked before the error and empty branches
+              so a switched-off conflict never reads as a collection problem. */}
+          {!isLoading && disabled && <PanelEmptyState kind="disabled" />}
+          {!isLoading && !disabled && error && (
             <PanelEmptyState kind="error" errorMessage={t("telegram.offline")} scope="telegram" />
           )}
-          {!isLoading && filtered.length > 0 && (
+          {!isLoading && !disabled && filtered.length > 0 && (
             <div className="space-y-2.5">
               {filtered.map((msg, i) => (
                 <div key={`${msg.channel}-${msg.message_id}-${i}`} className="pb-2.5 border-b border-border last:border-0">
@@ -203,7 +214,7 @@ export const TelegramPanel = () => {
               ))}
             </div>
           )}
-          {!isLoading && !error && filtered.length === 0 && (
+          {!isLoading && !error && !disabled && filtered.length === 0 && (
             hiddenByFilter ? (
               <p className="text-xs text-muted-foreground text-center py-8 font-mono">
                 {t("telegram.filteredOut")}

@@ -1,4 +1,4 @@
-import { AlertTriangle, Inbox, WifiOff } from "lucide-react";
+import { AlertTriangle, EyeOff, Inbox, WifiOff } from "lucide-react";
 import { useLanguage } from "@/i18n/LanguageContext";
 import { useSourceStatus, type SourceStatusEntry } from "@/hooks/useSourceStatus";
 
@@ -10,7 +10,7 @@ import { useSourceStatus, type SourceStatusEntry } from "@/hooks/useSourceStatus
 //TUNE: Control the (failing sources listed). Failing source names named in an empty state before the rest are counted.
 const MAX_NAMED_SOURCES = 3;
 
-type Kind = "error" | "empty";
+type Kind = "error" | "empty" | "disabled";
 
 interface Props {
   kind: Kind;
@@ -35,6 +35,18 @@ export const PanelEmptyState = ({ kind, emptyMessage, errorMessage, scope }: Pro
     : (data?.sources ?? []);
   const failing = scoped.filter((s) => !s.ok);
   const stale = scoped.filter((s) => s.ok && s.stale);
+
+  // The conflict is switched off. That outranks every other state including a
+  // failed request: the panel has no rows because Hessa hid this theatre, and
+  // naming a down collector here would send her after a bug that is not there.
+  if (kind === "disabled") {
+    return (
+      <Shell icon={<EyeOff className="h-5 w-5" />} tone="muted">
+        <Headline>{t("state.conflictDisabled")}</Headline>
+        <Detail>{t("state.conflictDisabledHint")}</Detail>
+      </Shell>
+    );
+  }
 
   // The panel request failed. That is the panel's own state and it outranks
   // whatever the collectors are doing.

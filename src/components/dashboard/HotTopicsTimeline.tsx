@@ -12,6 +12,7 @@ import { PanelEmptyState } from "./PanelEmptyState";
 import { formatLocalDate } from "@/utils/formatTime";
 import { useConflictFilter } from "@/contexts/ConflictFilterContext";
 import { normSeverity } from "@/utils/severity";
+import { isConflictDisabled } from "@/lib/conflictDisabled";
 
 interface HotTopic {
   item_id?: string;
@@ -38,6 +39,8 @@ interface HotTopicsResponse {
   topics: HotTopic[];
   conflicts?: ConflictRollup[];
   selected_by?: string;
+  /** Set by the API when the requested conflict is switched off. */
+  conflict_disabled?: boolean;
 }
 
 export const HotTopicsTimeline = () => {
@@ -67,6 +70,7 @@ export const HotTopicsTimeline = () => {
 
   const topics = translated?.topics ?? data?.topics ?? [];
   const rollups = data?.conflicts ?? [];
+  const disabled = isConflictDisabled(data);
 
   // An empty timeline is a real answer when nothing in the window materially
   // changed the situation, so the panel says that rather than implying the
@@ -117,10 +121,11 @@ export const HotTopicsTimeline = () => {
               ))}
             </div>
           )}
-          {error && !isLoading && (
+          {!isLoading && disabled && <PanelEmptyState kind="disabled" />}
+          {!isLoading && !disabled && error && (
             <PanelEmptyState kind="error" errorMessage={t("topics.offline")} />
           )}
-          {!error && !isLoading && topics.length === 0 && (
+          {!error && !isLoading && !disabled && topics.length === 0 && (
             <PanelEmptyState
               kind="empty"
               emptyMessage={
@@ -130,7 +135,7 @@ export const HotTopicsTimeline = () => {
               }
             />
           )}
-          {!error && !isLoading && topics.length > 0 && (
+          {!error && !isLoading && !disabled && topics.length > 0 && (
             <div className="relative">
               <div className="absolute left-2 top-0 bottom-0 w-px bg-border rtl:left-auto rtl:right-2" />
               <div className="space-y-4 pl-6 rtl:pl-0 rtl:pr-6">

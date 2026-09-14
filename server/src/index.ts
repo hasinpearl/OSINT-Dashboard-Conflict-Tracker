@@ -4,6 +4,7 @@ import { Hono } from "hono";
 import { initDb } from "./db";
 import { envKey } from "./env";
 import { refreshConflictSettings } from "./conflicts";
+import { conflictGate } from "./conflictGate";
 import {
   conflictsRoute,
   costsSummaryRoute,
@@ -64,6 +65,15 @@ app.use("*", async (c, next) => {
   await refreshConflictSettings();
   await next();
 });
+
+// A panel asked for a conflict that is currently switched off answers with an
+// empty list and an explicit marker, never with another conflict's rows. This
+// sits directly after the registry refresh, so the decision is made against
+// the same map every route below reads, and it is registered ONCE here rather
+// than in each of the six panel routes. It is a no-op for "all", for a request
+// naming no conflict, and for an enabled one: those reach their route
+// untouched.
+app.use("*", conflictGate);
 
 app.get("/api/health", healthRoute);
 

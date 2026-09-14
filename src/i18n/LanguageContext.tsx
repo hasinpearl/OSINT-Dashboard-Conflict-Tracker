@@ -153,6 +153,15 @@ const translations: Record<string, Record<Language, string>> = {
     ar: "العناصر المخزنة لا تحمل إحداثيات محددة بعد، لذا لا يوجد ما ترسمه الخريطة.",
   },
 
+  // A conflict Hessa switched off. Distinct from every empty state above: the
+  // store still holds this theatre's rows, the API is simply not revealing
+  // them, and saying "no data" here would read as a collection failure.
+  "state.conflictDisabled": { en: "CONFLICT DISABLED", ar: "الصراع معطّل" },
+  "state.conflictDisabledHint": {
+    en: "This conflict is switched off, so no panel reveals it. Its collected rows are retained and return when it is switched back on.",
+    ar: "هذا الصراع معطّل، لذا لا تعرضه أي لوحة. بياناته المجمعة محفوظة وتعود عند تشغيله مرة أخرى.",
+  },
+
   "notifications.title": { en: "Notifications", ar: "الإشعارات" },
   "notifications.empty": { en: "No notifications yet", ar: "لا توجد إشعارات بعد" },
   "notifications.clear": { en: "Clear all", ar: "مسح الكل" },

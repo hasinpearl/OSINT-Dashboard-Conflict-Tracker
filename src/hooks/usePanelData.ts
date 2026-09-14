@@ -18,13 +18,19 @@ export interface NewsStory {
 // Shared news query: NewsFeed, the breaking-news bar, and the notifications
 // feeder all use this hook. The queryKey and options match exactly, so React
 // Query serves every consumer from one cache entry — zero extra API calls.
+export interface NewsResponse {
+  stories: NewsStory[];
+  /** Set by the API when the requested conflict is switched off. */
+  conflict_disabled?: boolean;
+}
+
 export function useNewsStories() {
   const { conflict } = useConflictFilter();
 
   return useQuery({
     queryKey: ["news-feed", conflict],
     queryFn: () =>
-      invokeFn<{ stories: NewsStory[] }>("firecrawl-news", {
+      invokeFn<NewsResponse>("firecrawl-news", {
         conflict,
         ...(shouldForceRefresh(`news-feed:${conflict}`) ? { force_refresh: true } : {}),
       }),

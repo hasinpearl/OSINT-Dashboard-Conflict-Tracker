@@ -8,6 +8,7 @@ import { ExpandablePanel } from "./ExpandablePanel";
 import { PanelEmptyState } from "./PanelEmptyState";
 import { formatLocalDateTime } from "@/utils/formatTime";
 import { normSeverity } from "@/utils/severity";
+import { isConflictDisabled } from "@/lib/conflictDisabled";
 
 export const NewsFeed = () => {
   const { t } = useLanguage();
@@ -17,6 +18,7 @@ export const NewsFeed = () => {
   const { data: translated } = useTranslatedData(data, "news-feed");
 
   const stories = translated?.stories ?? data?.stories ?? [];
+  const disabled = isConflictDisabled(data);
 
   return (
     <ExpandablePanel>
@@ -40,13 +42,14 @@ export const NewsFeed = () => {
               ))}
             </div>
           )}
-          {error && !isLoading && (
+          {!isLoading && disabled && <PanelEmptyState kind="disabled" />}
+          {!isLoading && !disabled && error && (
             <PanelEmptyState kind="error" errorMessage={t("news.offline")} scope="rss" />
           )}
-          {!error && !isLoading && stories.length === 0 && (
+          {!error && !isLoading && !disabled && stories.length === 0 && (
             <PanelEmptyState kind="empty" emptyMessage={t("state.noStories")} scope="rss" />
           )}
-          {!error && !isLoading && stories.length > 0 && (
+          {!error && !isLoading && !disabled && stories.length > 0 && (
             <div className="space-y-3">
               {stories.map((item, i) => (
                 <article key={i} className="pb-3 border-b border-border last:border-0">

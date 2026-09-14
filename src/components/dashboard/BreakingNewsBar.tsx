@@ -5,6 +5,7 @@ import { useLanguage } from "@/i18n/LanguageContext";
 import { normSeverity } from "@/utils/severity";
 import { resolveTier } from "@/utils/tickerTiers";
 import { useSourceStatus } from "@/hooks/useSourceStatus";
+import { isConflictDisabled } from "@/lib/conflictDisabled";
 
 //TUNE: Control the (ticker minimum track length). Items the scroll track is padded to so it stays wider than the viewport.
 const MIN_TRACK_ITEMS = 6;
@@ -23,6 +24,19 @@ export const BreakingNewsBar = () => {
 
   const stories = translated?.stories ?? data?.stories ?? [];
   const resolved = resolveTier(stories);
+
+  // A switched-off conflict has no ticker, and saying so is not the same as
+  // saying nothing was collected. Checked before resolveTier's empty branch so
+  // the bar never blames the collectors for a hidden theatre.
+  if (isConflictDisabled(data)) {
+    return (
+      <TickerShell label={t("state.conflictDisabled")}>
+        <span className="px-4 text-[10px] font-mono text-muted-foreground truncate">
+          {t("state.conflictDisabledHint")}
+        </span>
+      </TickerShell>
+    );
+  }
 
   // Only a genuinely empty store reaches this branch, and what it says is
   // diagnostic rather than reassuring: nothing has been collected yet, here is

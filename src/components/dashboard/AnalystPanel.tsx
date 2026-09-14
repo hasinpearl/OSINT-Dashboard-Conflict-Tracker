@@ -10,6 +10,7 @@ import { ExpandablePanel } from "./ExpandablePanel";
 import { PanelEmptyState } from "./PanelEmptyState";
 import { formatLocalDateTime } from "@/utils/formatTime";
 import { useConflictFilter } from "@/contexts/ConflictFilterContext";
+import { isConflictDisabled } from "@/lib/conflictDisabled";
 
 interface AnalystComment {
   analyst: string;
@@ -27,7 +28,7 @@ export const AnalystPanel = () => {
   const { data, isLoading, error } = useQuery({
     queryKey: ["analyst", conflict],
     queryFn: () =>
-      invokeFn<{ comments: AnalystComment[] }>("analyst", {
+      invokeFn<{ comments: AnalystComment[]; conflict_disabled?: boolean }>("analyst", {
         conflict,
         ...(shouldForceRefresh(`analyst:${conflict}`) ? { force_refresh: true } : {}),
       }),
@@ -38,6 +39,7 @@ export const AnalystPanel = () => {
   const { data: translated } = useTranslatedData(data, "analyst");
 
   const comments = translated?.comments ?? data?.comments ?? [];
+  const disabled = isConflictDisabled(data);
 
   return (
     <ExpandablePanel>
@@ -57,13 +59,14 @@ export const AnalystPanel = () => {
               ))}
             </div>
           )}
-          {error && !isLoading && (
+          {!isLoading && disabled && <PanelEmptyState kind="disabled" />}
+          {!isLoading && !disabled && error && (
             <PanelEmptyState kind="error" errorMessage={t("analyst.offline")} />
           )}
-          {!error && !isLoading && comments.length === 0 && (
+          {!error && !isLoading && !disabled && comments.length === 0 && (
             <PanelEmptyState kind="empty" emptyMessage={t("state.noCommentary")} />
           )}
-          {!error && !isLoading && comments.length > 0 && (
+          {!error && !isLoading && !disabled && comments.length > 0 && (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
               {comments.map((item, i) => (
                 <div key={i} className="p-3 bg-muted/50 rounded-sm border border-border">

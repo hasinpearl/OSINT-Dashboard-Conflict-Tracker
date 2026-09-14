@@ -10,6 +10,7 @@ import { useTranslatedData } from "@/hooks/useTranslatedData";
 import { ExpandablePanel } from "./ExpandablePanel";
 import { PanelEmptyState } from "./PanelEmptyState";
 import { useConflictFilter } from "@/contexts/ConflictFilterContext";
+import { isConflictDisabled } from "@/lib/conflictDisabled";
 
 interface BiasData {
   total_stories: number;
@@ -46,6 +47,14 @@ interface AllResponse {
   mode: "all";
   conflicts: Array<BiasData & { conflict: string; label: string }>;
   last_updated: string;
+}
+
+// The refusal the API returns for a switched-off conflict. There is no
+// spectrum in it at all, so it is NOT part of BiasResponse: the panel checks
+// the marker first and never reads a bar, a bloc or a label off this shape.
+interface DisabledResponse {
+  conflict_disabled: true;
+  conflict: string;
 }
 
 type BiasResponse = SingleResponse | AllResponse;
@@ -170,7 +179,7 @@ export const BiasTracker = () => {
   const { data, isLoading, error } = useQuery({
     queryKey: ["bias-tracker", conflict],
     queryFn: () =>
-      invokeFn<BiasResponse>("bias-tracker", {
+      invokeFn<BiasResponse | DisabledResponse>("bias-tracker", {
         conflict,
         ...(shouldForceRefresh(`bias-tracker:${conflict}`) ? { force_refresh: true } : {}),
       }),
@@ -179,7 +188,10 @@ export const BiasTracker = () => {
   });
 
   const { data: translated } = useTranslatedData(data, "bias-tracker");
-  const view = (translated ?? data) as BiasResponse | undefined;
+  // Read off the raw response, before the union is narrowed: a disabled answer
+  // carries no spectrum, so nothing below may treat it as one.
+  const disabled = isConflictDisabled(data);
+  const view = disabled ? undefined : ((translated ?? data) as BiasResponse | undefined);
 
   const lastAnalyzed = view?.last_updated
     ? toLatinDigits(new Date(view.last_updated).toLocaleString("en-GB"))
@@ -214,10 +226,11 @@ export const BiasTracker = () => {
               <Skeleton className="h-3 w-1/2" />
             </div>
           )}
-          {error && !isLoading && (
+          {!isLoading && disabled && <PanelEmptyState kind="disabled" />}
+          {!isLoading && !disabled && error && (
             <PanelEmptyState kind="error" errorMessage={t("bias.offline")} scope="rss" />
           )}
-          {!error && !isLoading && noCoverage && (
+          {!error && !isLoading && !disabled && noCoverage && (
             <PanelEmptyState kind="empty" emptyMessage={t("state.noCoverage")} scope="rss" />
           )}
 

@@ -10,6 +10,7 @@ import { ExpandablePanel } from "./ExpandablePanel";
 import { PanelEmptyState } from "./PanelEmptyState";
 import { formatLocalDateTime } from "@/utils/formatTime";
 import { useConflictFilter } from "@/contexts/ConflictFilterContext";
+import { isConflictDisabled } from "@/lib/conflictDisabled";
 
 interface OsintItem {
   title: string;
@@ -50,7 +51,7 @@ export const OsintPanel = () => {
   const { data, isLoading, error } = useQuery({
     queryKey: ["osint", conflict],
     queryFn: () =>
-      invokeFn<{ items: OsintItem[] }>("osint", {
+      invokeFn<{ items: OsintItem[]; conflict_disabled?: boolean }>("osint", {
         conflict,
         ...(shouldForceRefresh(`osint:${conflict}`) ? { force_refresh: true } : {}),
       }),
@@ -59,6 +60,7 @@ export const OsintPanel = () => {
   });
 
   const { data: translated } = useTranslatedData(data, "osint");
+  const disabled = isConflictDisabled(data);
 
   return (
     <ExpandablePanel>
@@ -78,10 +80,11 @@ export const OsintPanel = () => {
               ))}
             </div>
           )}
-          {error && !isLoading && (
+          {!isLoading && disabled && <PanelEmptyState kind="disabled" />}
+          {!isLoading && !disabled && error && (
             <PanelEmptyState kind="error" errorMessage={t("osint.offline")} />
           )}
-          {!error && !isLoading && (() => {
+          {!error && !isLoading && !disabled && (() => {
             const rawItems = translated?.items ?? data?.items ?? [];
             // A placeholder row is the server saying it has nothing. Rendering
             // skeletons for it claimed the panel was still loading forever.
