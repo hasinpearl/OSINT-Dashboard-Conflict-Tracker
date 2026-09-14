@@ -9,6 +9,7 @@
     "typecheck": "tsc --noEmit",
     "workers:start": "tsx src/workers/index.ts",
     "rss:once": "tsx src/workers/rss-cli.ts",
+    "tg:preview": "tsx src/workers/telegram-preview-cli.ts",
     "enrich": "tsx src/workers/enrich-cli.ts",
     "enrich:all": "tsx src/workers/enrich-cli.ts --all",
     "geocode": "tsx src/workers/geocode-cli.ts",

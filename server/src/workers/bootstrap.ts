@@ -13,8 +13,8 @@ import { startCollectorSupervisor, stopCollectorSupervisor } from "./supervisor"
 // /api/* route into a 502; now it only kills the child, which the supervisor
 // restarts.
 
-//TUNE: Control the (in-process collection). WORKERS_IN_API=run the collectors inside the API when no worker heartbeat is seen. Set false in the standalone workers service.
-const WORKERS_IN_API = envKey("WORKERS_IN_API").toLowerCase() !== "false";
+//TUNE: Control the (in-process collection). WORKERS_IN_API=true runs the collectors inside the API when no worker heartbeat is seen. Off by default so a serving API cannot be destabilised by collection.
+const WORKERS_IN_API = envKey("WORKERS_IN_API").toLowerCase() === "true";
 //TUNE: Control the (fallback grace). WORKERS_IN_API_GRACE_SECONDS=how long to wait for a worker heartbeat before starting collectors in-process.
 const WORKERS_IN_API_GRACE_SECONDS = parseInt(
   envKey("WORKERS_IN_API_GRACE_SECONDS") || "90",
