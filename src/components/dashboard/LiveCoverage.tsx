@@ -14,7 +14,7 @@ interface Channel {
 const BRAND_TEAL = "#00A7B5";
 const CHANNELS: Channel[] = [
   { id: "bloomberg", name: "BLOOMBERG", videoId: "QB5BNdBFujE", lang: "en", color: BRAND_TEAL },
-  { id: "skynews", name: "SKY NEWS", videoId: "YDvsBbKfLPA", lang: "en", color: BRAND_TEAL },
+  { id: "skynews", name: "SKY NEWS", videoId: "xDWQ3LkccY8", lang: "en", color: BRAND_TEAL },
   { id: "dw", name: "DW", videoId: "LuKwFajn37U", lang: "en", color: BRAND_TEAL },
   { id: "skynews-arabia", name: "SKY NEWS ARABIA", videoId: "ppgTP8xQQsM", lang: "ar", color: BRAND_TEAL },
   { id: "aljazeera", name: "AL JAZEERA", videoId: "bNyUyrR0PHo", lang: "ar", color: BRAND_TEAL },
